@@ -157,68 +157,59 @@ task.spawn(function()
     end
 end)
 
--- Vòng lặp 2: Kill Aura (Đánh quái gần nhất trong phạm vi mà không bay tới)
+-- ==========================================
+-- VÒNG LẶP 2: KILL AURA (WEAPON HITBOX EXPANSION)
 -- ==========================================
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
             local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local hrp = char.HumanoidRootPart
-                local closestDistance = _G.HitDistance 
-                local targetRoot = nil
+            
+            -- Bắt buộc phải CẦM VŨ KHÍ trên tay
+            local weapon = char and char:FindFirstChildOfClass("Tool")
+            
+            if char and weapon then
+                -- Tìm lưỡi kiếm / phần gây sát thương
+                local handle = weapon:FindFirstChild("Handle") or weapon:FindFirstChild("Hitbox") or weapon:FindFirstChildWhichIsA("BasePart")
                 
-                local npcFolder = workspace:FindFirstChild("NPCs")
-                if npcFolder then
-                    for _, npc in ipairs(npcFolder:GetChildren()) do
-                        if npc:IsA("Model") then
-                            local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
-                            local hum = npc:FindFirstChildOfClass("Humanoid")
-                            
-                            -- Nếu quái tồn tại và còn sống
-                            if root and (not hum or hum.Health > 0) then
-                                local dist = (root.Position - hrp.Position).Magnitude
-                                
-                                if dist <= closestDistance then
-                                    closestDistance = dist
-                                    targetRoot = root
-                                    
-                                    -- THỦ THUẬT: Phóng to cơ thể quái để bao trùm lấy nhân vật
-                                    -- Nhân 2.5 lần khoảng cách để đảm bảo viền Hitbox chắn chắn lấp đầy tới chỗ bạn đứng
-                                    local newSize = dist * 2.5
-                                    root.Size = Vector3.new(newSize, newSize, newSize)
-                                    root.Transparency = 0.99 -- Làm tàng hình để không chắn tầm nhìn
-                                    root.CanCollide = false  -- Tắt va chạm để bạn không bị kẹt
-                                else
-                                    -- Thu nhỏ lại kích thước chuẩn nếu quái văng ra khỏi tầm
-                                    if root.Size.X > 10 then
-                                        root.Size = Vector3.new(2, 2, 1)
-                                        root.Transparency = 1
-                                    end
-                                end
-                            end
-                        end
+                if handle then
+                    -- 1. Lưu lại kích thước gốc của kiếm để sau này trả về y nguyên
+                    if not handle:FindFirstChild("OriginalSizeString") then
+                        local og = Instance.new("StringValue")
+                        og.Name = "OriginalSizeString"
+                        -- Chuyển Vector3 thành chuỗi để lưu trữ an toàn
+                        og.Value = tostring(handle.Size.X) .. "," .. tostring(handle.Size.Y) .. "," .. tostring(handle.Size.Z)
+                        og.Parent = handle
                     end
-                end
-                
-                -- Phát lệnh đánh. Máy chủ sẽ thấy rìa Hitbox khổng lồ của quái đang chạm vào bạn và đồng ý!
-                if targetRoot then
+                    
+                    -- 2. Bơm to lưỡi kiếm bằng với phạm vi thanh Slider
+                    local size = _G.HitDistance
+                    handle.Size = Vector3.new(size, size, size)
+                    
+                    -- Làm tàng hình để không mù mắt, tắt va chạm để không kẹt, làm nhẹ để không bị bay
+                    handle.Transparency = 1
+                    handle.CanCollide = false
+                    handle.Massless = true
+                    
+                    -- 3. Gửi lệnh vung kiếm liên tục. 
+                    -- Do kiếm đang to đùng, nó sẽ tự quét trúng mọi con quái trong bán kính.
                     pcall(function()
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
                 end
             end
         else
-            -- AN TOÀN: Nếu tắt Auto Hit, tự động thu nhỏ lại toàn bộ Hitbox trong map để game không bị lỗi
-            local npcFolder = workspace:FindFirstChild("NPCs")
-            if npcFolder then
-                for _, npc in ipairs(npcFolder:GetChildren()) do
-                    if npc:IsA("Model") then
-                        local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
-                        if root and root.Size.X > 10 then
-                            root.Size = Vector3.new(2, 2, 1)
-                            root.Transparency = 1
-                        end
+            -- AN TOÀN: Khi tắt Auto Hit, tự động xì hơi thanh kiếm về lại như cũ
+            local char = LocalPlayer.Character
+            local weapon = char and char:FindFirstChildOfClass("Tool")
+            if weapon then
+                local handle = weapon:FindFirstChild("Handle") or weapon:FindFirstChild("Hitbox") or weapon:FindFirstChildWhichIsA("BasePart")
+                if handle and handle:FindFirstChild("OriginalSizeString") then
+                    local parts = string.split(handle.OriginalSizeString.Value, ",")
+                    if #parts == 3 then
+                        handle.Size = Vector3.new(tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3]))
+                        handle.Transparency = 0 -- Hiện lại vũ khí
+                        handle.Massless = false
                     end
                 end
             end
