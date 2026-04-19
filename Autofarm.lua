@@ -159,46 +159,65 @@ end)
 
 -- Vòng lặp 2: Kill Aura (Đánh quái gần nhất trong phạm vi mà không bay tới)
 -- ==========================================
--- ==========================================
--- VÒNG LẶP 2: KILL AURA (FIRETOUCHINTEREST - ÉP CHẠM ẢO)
--- ==========================================
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
             local char = LocalPlayer.Character
-            
-            -- Phải cầm vũ khí (Tool) trên tay thì mới có vật thể để gây sát thương
-            local weapon = char and char:FindFirstChildOfClass("Tool")
-            
-            if char and weapon and char:FindFirstChild("HumanoidRootPart") then
+            if char and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
+                local closestDistance = _G.HitDistance 
+                local targetRoot = nil
                 
-                -- Tìm Hitbox của vũ khí (thường là Handle)
-                local weaponPart = weapon:FindFirstChild("Handle") or weapon:FindFirstChild("Hitbox") or weapon:FindFirstChildWhichIsA("BasePart")
-                
-                if weaponPart then
-                    local npcFolder = workspace:FindFirstChild("NPCs")
-                    if npcFolder then
-                        -- Quét toàn bộ quái trong map
-                        for _, npc in ipairs(npcFolder:GetChildren()) do
-                            if npc:IsA("Model") then
-                                local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
-                                local hum = npc:FindFirstChildOfClass("Humanoid")
+                local npcFolder = workspace:FindFirstChild("NPCs")
+                if npcFolder then
+                    for _, npc in ipairs(npcFolder:GetChildren()) do
+                        if npc:IsA("Model") then
+                            local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+                            local hum = npc:FindFirstChildOfClass("Humanoid")
+                            
+                            -- Nếu quái tồn tại và còn sống
+                            if root and (not hum or hum.Health > 0) then
+                                local dist = (root.Position - hrp.Position).Magnitude
                                 
-                                -- Nếu quái còn sống
-                                if root and (not hum or hum.Health > 0) then
-                                    local dist = (root.Position - hrp.Position).Magnitude
+                                if dist <= closestDistance then
+                                    closestDistance = dist
+                                    targetRoot = root
                                     
-                                    -- Nếu quái lọt vào phạm vi thanh Slider (Ví dụ: 250 studs)
-                                    if dist <= _G.HitDistance then
-                                        -- Ép vật lý ảo: Báo với game là kiếm đang chạm vào người quái
-                                        pcall(function()
-                                            firetouchinterest(root, weaponPart, 0) -- 0 là Bắt đầu chạm
-                                            firetouchinterest(root, weaponPart, 1) -- 1 là Kết thúc chạm (để chém được nhát tiếp theo)
-                                        end)
+                                    -- THỦ THUẬT: Phóng to cơ thể quái để bao trùm lấy nhân vật
+                                    -- Nhân 2.5 lần khoảng cách để đảm bảo viền Hitbox chắn chắn lấp đầy tới chỗ bạn đứng
+                                    local newSize = dist * 2.5
+                                    root.Size = Vector3.new(newSize, newSize, newSize)
+                                    root.Transparency = 0.99 -- Làm tàng hình để không chắn tầm nhìn
+                                    root.CanCollide = false  -- Tắt va chạm để bạn không bị kẹt
+                                else
+                                    -- Thu nhỏ lại kích thước chuẩn nếu quái văng ra khỏi tầm
+                                    if root.Size.X > 10 then
+                                        root.Size = Vector3.new(2, 2, 1)
+                                        root.Transparency = 1
                                     end
                                 end
                             end
+                        end
+                    end
+                end
+                
+                -- Phát lệnh đánh. Máy chủ sẽ thấy rìa Hitbox khổng lồ của quái đang chạm vào bạn và đồng ý!
+                if targetRoot then
+                    pcall(function()
+                        ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
+                    end)
+                end
+            end
+        else
+            -- AN TOÀN: Nếu tắt Auto Hit, tự động thu nhỏ lại toàn bộ Hitbox trong map để game không bị lỗi
+            local npcFolder = workspace:FindFirstChild("NPCs")
+            if npcFolder then
+                for _, npc in ipairs(npcFolder:GetChildren()) do
+                    if npc:IsA("Model") then
+                        local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+                        if root and root.Size.X > 10 then
+                            root.Size = Vector3.new(2, 2, 1)
+                            root.Transparency = 1
                         end
                     end
                 end
