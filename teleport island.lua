@@ -8,13 +8,31 @@ local function BypassInstantTeleport(targetCFrame)
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
+    
     local direction = (targetCFrame.Position - hrp.Position).Unit
     if (targetCFrame.Position - hrp.Position).Magnitude < 1 then direction = Vector3.new(0, 0, 1) end 
+    
+    local args = { Vector3.new(direction.X, 0, direction.Z), 33, false }
+    local dashRemote = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("DashRemote")
+    
+    -- Dịch chuyển tức thời
     hrp.CFrame = targetCFrame
+    
+    -- Lần Dash 1 (Đánh lừa đợt 1)
     pcall(function()
-        local args = { Vector3.new(direction.X, 0, direction.Z), 33, false }
-        ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("DashRemote"):FireServer(unpack(args))
+        dashRemote:FireServer(unpack(args))
     end)
+    
+    -- Nghỉ nửa nhịp để server ghi nhận, sau đó neo lại vị trí chống trượt
+    task.wait(0.05)
+    hrp.CFrame = targetCFrame
+    
+    -- Lần Dash 2 (Chốt hạ qua mặt Anti-Cheat)
+    pcall(function()
+        dashRemote:FireServer(unpack(args))
+    end)
+    
+    -- Đợi hoạt ảnh dash xong và chốt vị trí lần cuối cùng
     task.wait(0.1)
     hrp.CFrame = targetCFrame
 end
