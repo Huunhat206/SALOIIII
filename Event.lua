@@ -4,21 +4,39 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
+-- ==========================================
+-- HÀM DỊCH CHUYỂN TỨC THỜI (ANTI-RUBBERBAND)
+-- ==========================================
 local function BypassInstantTeleport(targetCFrame)
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
+    
     local direction = (targetCFrame.Position - hrp.Position).Unit
     if (targetCFrame.Position - hrp.Position).Magnitude < 1 then direction = Vector3.new(0, 0, 1) end 
+    
+    local args = { Vector3.new(direction.X, 0, direction.Z), 33, false }
+    local dashRemote = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("DashRemote")
+    
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+    hrp.Anchored = true
+    
+    pcall(function() dashRemote:FireServer(unpack(args)) end)
     hrp.CFrame = targetCFrame
-    pcall(function()
-        local args = { Vector3.new(direction.X, 0, direction.Z), 33, false }
-        ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("DashRemote"):FireServer(unpack(args))
-    end)
-    task.wait(0.1)
+    
+    task.wait(0.15)
+    
+    pcall(function() dashRemote:FireServer(unpack(args)) end)
     hrp.CFrame = targetCFrame
+    
+    task.wait(0.05)
+    hrp.Anchored = false
 end
 
+-- ==========================================
+-- GIAO DIỆN SỰ KIỆN
+-- ==========================================
 local EggTab = Window:CreateTab("🥚 Sự Kiện", 4483362458)
 
 EggTab:CreateButton({
@@ -40,8 +58,11 @@ EggTab:CreateButton({
                    local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
                    if prompt or string.find(string.lower(item.Name), "egg") then
                        count = count + 1
+                       
+                       -- Dùng hàm Teleport xịn
                        BypassInstantTeleport(targetCFrame)
                        task.wait(0.1) 
+                       
                        if prompt then
                            pcall(function() fireproximityprompt(prompt) end)
                            task.wait(prompt.HoldDuration + 0.1) 
