@@ -158,60 +158,83 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- VÒNG LẶP 2: KILL AURA (WEAPON HITBOX EXPANSION)
--- ==========================================
+local ghostPart = nil
+
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
             local char = LocalPlayer.Character
-            
-            -- Bắt buộc phải CẦM VŨ KHÍ trên tay
-            local weapon = char and char:FindFirstChildOfClass("Tool")
-            
-            if char and weapon then
-                -- Tìm lưỡi kiếm / phần gây sát thương
-                local handle = weapon:FindFirstChild("Handle") or weapon:FindFirstChild("Hitbox") or weapon:FindFirstChildWhichIsA("BasePart")
+            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
+                local hrp = char.HumanoidRootPart
+                local hum = char.Humanoid
+
+                -- 1. Tạo "Cái bóng" tàng hình và ép Camera nhìn vào cái bóng này thay vì nhân vật
+                if not ghostPart then
+                    ghostPart = Instance.new("Part")
+                    ghostPart.Size = Vector3.new(1, 1, 1)
+                    ghostPart.Transparency = 1
+                    ghostPart.Anchored = true
+                    ghostPart.CanCollide = false
+                    ghostPart.CFrame = hrp.CFrame -- Đứng ngay vị trí hiện tại
+                    ghostPart.Parent = workspace
+                    workspace.CurrentCamera.CameraSubject = ghostPart
+                end
+
+                local closestDistance = _G.HitDistance 
+                local targetRoot = nil
                 
-                if handle then
-                    -- 1. Lưu lại kích thước gốc của kiếm để sau này trả về y nguyên
-                    if not handle:FindFirstChild("OriginalSizeString") then
-                        local og = Instance.new("StringValue")
-                        og.Name = "OriginalSizeString"
-                        -- Chuyển Vector3 thành chuỗi để lưu trữ an toàn
-                        og.Value = tostring(handle.Size.X) .. "," .. tostring(handle.Size.Y) .. "," .. tostring(handle.Size.Z)
-                        og.Parent = handle
+                local npcFolder = workspace:FindFirstChild("NPCs")
+                if npcFolder then
+                    for _, npc in ipairs(npcFolder:GetChildren()) do
+                        if npc:IsA("Model") then
+                            local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+                            local npcHum = npc:FindFirstChildOfClass("Humanoid")
+                            
+                            if root and (not npcHum or npcHum.Health > 0) then
+                                -- Đo khoảng cách từ "Cái bóng" (chỗ Camera đang đứng) đến quái
+                                local dist = (root.Position - ghostPart.Position).Magnitude
+                                
+                                if dist <= closestDistance then
+                                    closestDistance = dist
+                                    targetRoot = root
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                if targetRoot then
+                    -- Tắt va chạm để xác thật bay xuyên tường/vật cản
+                    for _, v in pairs(char:GetDescendants()) do
+                        if v:IsA("BasePart") then v.CanCollide = false end
                     end
                     
-                    -- 2. Bơm to lưỡi kiếm bằng với phạm vi thanh Slider
-                    local size = _G.HitDistance
-                    handle.Size = Vector3.new(size, size, size)
+                    -- Dịch chuyển xác thật áp sát con quái
+                    hrp.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
                     
-                    -- Làm tàng hình để không mù mắt, tắt va chạm để không kẹt, làm nhẹ để không bị bay
-                    handle.Transparency = 1
-                    handle.CanCollide = false
-                    handle.Massless = true
-                    
-                    -- 3. Gửi lệnh vung kiếm liên tục. 
-                    -- Do kiếm đang to đùng, nó sẽ tự quét trúng mọi con quái trong bán kính.
+                    -- Gửi lệnh chém (Server thấy bạn đang ở sát quái nên 100% nhận sát thương)
                     pcall(function()
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
+                else
+                    -- Không có quái thì xác thật bay về đứng chung với cái bóng
+                    hrp.CFrame = ghostPart.CFrame
                 end
             end
         else
-            -- AN TOÀN: Khi tắt Auto Hit, tự động xì hơi thanh kiếm về lại như cũ
-            local char = LocalPlayer.Character
-            local weapon = char and char:FindFirstChildOfClass("Tool")
-            if weapon then
-                local handle = weapon:FindFirstChild("Handle") or weapon:FindFirstChild("Hitbox") or weapon:FindFirstChildWhichIsA("BasePart")
-                if handle and handle:FindFirstChild("OriginalSizeString") then
-                    local parts = string.split(handle.OriginalSizeString.Value, ",")
-                    if #parts == 3 then
-                        handle.Size = Vector3.new(tonumber(parts[1]), tonumber(parts[2]), tonumber(parts[3]))
-                        handle.Transparency = 0 -- Hiện lại vũ khí
-                        handle.Massless = false
+            -- 2. Khôi phục lại trạng thái bình thường khi tắt Auto Hit
+            if ghostPart then
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("Humanoid") then
+                    -- Kéo xác thật về lại vị trí đang nhìn
+                    if char:FindFirstChild("HumanoidRootPart") then
+                        char.HumanoidRootPart.CFrame = ghostPart.CFrame
                     end
+                    -- Trả lại Camera theo dõi nhân vật
+                    workspace.CurrentCamera.CameraSubject = char.Humanoid
                 end
+                ghostPart:Destroy()
+                ghostPart = nil
             end
         end
     end
