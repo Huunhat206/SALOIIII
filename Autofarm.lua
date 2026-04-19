@@ -158,6 +158,9 @@ task.spawn(function()
 end)
 
 -- Vòng lặp 2: Kill Aura (Đánh quái gần nhất trong phạm vi mà không bay tới)
+-- ==========================================
+-- VÒNG LẶP 2: KILL AURA (SHADOW HIT BYPASS)
+-- ==========================================
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
@@ -181,18 +184,35 @@ task.spawn(function()
                                 -- So sánh khoảng cách
                                 if dist <= closestDistance then
                                     closestDistance = dist
-                                    target = npc
+                                    target = root -- Lưu thẳng bộ phận cơ thể quái để tiện tính toán
                                 end
                             end
                         end
                     end
                 end
                 
-                -- Phát lệnh đánh nếu có mục tiêu lọt vào tầm ngắm
+                -- Phát lệnh đánh bằng kỹ thuật SHADOW HIT
                 if target then
+                    -- 1. Lưu lại vị trí thực tế bạn đang đứng
+                    local originalCFrame = hrp.CFrame
+                    
+                    -- 2. Tắt va chạm tạm thời để lúc bay đi bay về không bị vấp vào đá hay tường
+                    for _, v in pairs(char:GetDescendants()) do
+                        if v:IsA("BasePart") and v.CanCollide then
+                            v.CanCollide = false
+                        end
+                    end
+                    
+                    -- 3. Dịch chuyển chớp nhoáng ra sau lưng quái
+                    hrp.CFrame = target.CFrame * CFrame.new(0, 0, 3)
+                    
+                    -- 4. Bắn lệnh chém (Lúc này server sẽ thấy bạn đang ở rất gần quái và đồng ý cho chém)
                     pcall(function()
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
+                    
+                    -- 5. Lập tức giật ngược nhân vật về chỗ cũ
+                    hrp.CFrame = originalCFrame
                 end
             end
         end
