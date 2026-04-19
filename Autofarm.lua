@@ -2,11 +2,36 @@ local Window, Rayfield = ... -- Nhận giao diện từ Hnhathub.lua
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
--- Khởi tạo biến toàn cục cho các tính năng mới
+-- Khởi tạo biến toàn cục
+_G.AutoFarm = false
+_G.SelectedNPC = "None"
 _G.AutoHitClosest = false
 _G.HitDistance = 250
+
+-- Biến hỗ trợ cho kỹ thuật Hook
+local TargetForHook = nil
+
+-- ==========================================
+-- KỸ THUẬT GHOST POSITION HOOK (ANTI-TELEPORT)
+-- Can thiệp vào nhân hệ thống để giả lập vị trí khi Server kiểm tra
+-- ==========================================
+local mt = getrawmetatable(game)
+local oldIndex = mt.__index
+setreadonly(mt, false)
+
+mt.__index = newcclosure(function(self, index)
+    -- Nếu đang bật Kill Aura và hệ thống check tọa độ của nhân vật
+    if _G.AutoHitClosest and TargetForHook and index == "CFrame" and self.Name == "HumanoidRootPart" then
+        -- Trả về tọa độ "giả" sát mục tiêu để đánh lừa Magnitude Check của Server
+        return TargetForHook.CFrame * CFrame.new(0, 0, 2)
+    end
+    return oldIndex(self, index)
+end)
+
+setreadonly(mt, true)
 
 -- ==========================================
 -- HÀM LỌC VÀ LẤY DANH SÁCH NPC
@@ -157,12 +182,7 @@ task.spawn(function()
     end
 end)
 
--- ==========================================
-local ghostPart = nil
-
--- ==========================================
--- VÒNG LẶP 2: KILL AURA (LOCAL POSITION SPOOFING)
--- ==========================================
+-- Vòng lặp 2: KILL AURA (SỬ DỤNG GHOST HOOK)
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
@@ -170,8 +190,9 @@ task.spawn(function()
             if char and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
                 local closestDistance = _G.HitDistance 
-                local targetRoot = nil
+                TargetForHook = nil
                 
+                -- Tìm quái gần nhất trong map
                 local npcFolder = workspace:FindFirstChild("NPCs")
                 if npcFolder then
                     for _, npc in ipairs(npcFolder:GetChildren()) do
@@ -183,30 +204,24 @@ task.spawn(function()
                                 local dist = (root.Position - hrp.Position).Magnitude
                                 if dist <= closestDistance then
                                     closestDistance = dist
-                                    targetRoot = root
+                                    TargetForHook = root -- Gán mục tiêu để Meta Hook xử lý tọa độ giả
                                 end
                             end
                         end
                     end
                 end
                 
-                if targetRoot then
-                    -- BÍ QUYẾT: Chỉ thay đổi CFrame đúng lúc FireServer rồi trả lại ngay lập tức
-                    -- Việc này diễn ra nhanh đến mức Engine đồ họa không kịp vẽ (Render) cảnh bạn bị dịch chuyển
-                    local oldCFrame = hrp.CFrame
-                    
-                    -- Ép tọa độ nhân vật đến sát con quái (Chỉ ở mức dữ liệu gửi đi)
-                    hrp.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
-                    
-                    -- Gửi lệnh chém (Server nhận được tọa độ đã áp sát nên sẽ tính Damage)
+                -- Thực hiện đòn đánh
+                if TargetForHook then
                     pcall(function()
+                        -- Khi Server gọi lệnh kiểm tra vị trí của bạn, 
+                        -- nó sẽ nhận được vị trí giả ngay sát con quái nhờ đoạn Hook ở đầu script.
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
-                    
-                    -- Trả lại tọa độ cũ ngay lập tức để bạn không bị khựng hay tele trên màn hình
-                    hrp.CFrame = oldCFrame
                 end
             end
+        else
+            TargetForHook = nil -- Reset khi tắt tính năng
         end
     end
 end)
