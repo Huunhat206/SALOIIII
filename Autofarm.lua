@@ -159,51 +159,48 @@ end)
 
 -- Vòng lặp 2: Kill Aura (Đánh quái gần nhất trong phạm vi mà không bay tới)
 -- ==========================================
+-- ==========================================
+-- VÒNG LẶP 2: KILL AURA (FIRETOUCHINTEREST - ÉP CHẠM ẢO)
+-- ==========================================
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
             local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
+            
+            -- Phải cầm vũ khí (Tool) trên tay thì mới có vật thể để gây sát thương
+            local weapon = char and char:FindFirstChildOfClass("Tool")
+            
+            if char and weapon and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
-                local closestDistance = _G.HitDistance 
-                local target = nil
-                local targetRoot = nil
                 
-                local npcFolder = workspace:FindFirstChild("NPCs")
-                if npcFolder then
-                    for _, npc in ipairs(npcFolder:GetChildren()) do
-                        if npc:IsA("Model") then
-                            local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart")
-                            local hum = npc:FindFirstChildOfClass("Humanoid")
-                            
-                            -- Kiểm tra quái còn tồn tại và còn máu
-                            if root and (not hum or hum.Health > 0) then
-                                local dist = (root.Position - hrp.Position).Magnitude
+                -- Tìm Hitbox của vũ khí (thường là Handle)
+                local weaponPart = weapon:FindFirstChild("Handle") or weapon:FindFirstChild("Hitbox") or weapon:FindFirstChildWhichIsA("BasePart")
+                
+                if weaponPart then
+                    local npcFolder = workspace:FindFirstChild("NPCs")
+                    if npcFolder then
+                        -- Quét toàn bộ quái trong map
+                        for _, npc in ipairs(npcFolder:GetChildren()) do
+                            if npc:IsA("Model") then
+                                local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+                                local hum = npc:FindFirstChildOfClass("Humanoid")
                                 
-                                -- Tìm con quái gần nhất trong phạm vi thanh Slider
-                                if dist <= closestDistance then
-                                    closestDistance = dist
-                                    target = npc
-                                    targetRoot = root
+                                -- Nếu quái còn sống
+                                if root and (not hum or hum.Health > 0) then
+                                    local dist = (root.Position - hrp.Position).Magnitude
+                                    
+                                    -- Nếu quái lọt vào phạm vi thanh Slider (Ví dụ: 250 studs)
+                                    if dist <= _G.HitDistance then
+                                        -- Ép vật lý ảo: Báo với game là kiếm đang chạm vào người quái
+                                        pcall(function()
+                                            firetouchinterest(root, weaponPart, 0) -- 0 là Bắt đầu chạm
+                                            firetouchinterest(root, weaponPart, 1) -- 1 là Kết thúc chạm (để chém được nhát tiếp theo)
+                                        end)
+                                    end
                                 end
                             end
                         end
                     end
-                end
-                
-                -- Phát lệnh đánh bằng kỹ thuật KÉO QUÁI
-                if target and targetRoot then
-                    -- 1. Ép con quái dịch chuyển tức thời đến cách mặt bạn 3 studs
-                    targetRoot.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
-                    
-                    -- 2. Triệt tiêu đà của quái để nó không bị văng đi lung tung
-                    targetRoot.AssemblyLinearVelocity = Vector3.zero
-                    targetRoot.AssemblyAngularVelocity = Vector3.zero
-                    
-                    -- 3. Gửi lệnh chém (Lúc này quái đã ở ngay sát bạn nên Server chắc chắn chấp nhận sát thương)
-                    pcall(function()
-                        ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
-                    end)
                 end
             end
         end
