@@ -159,8 +159,6 @@ end)
 
 -- Vòng lặp 2: Kill Aura (Đánh quái gần nhất trong phạm vi mà không bay tới)
 -- ==========================================
--- VÒNG LẶP 2: KILL AURA (SHADOW HIT BYPASS)
--- ==========================================
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
@@ -169,6 +167,7 @@ task.spawn(function()
                 local hrp = char.HumanoidRootPart
                 local closestDistance = _G.HitDistance 
                 local target = nil
+                local targetRoot = nil
                 
                 local npcFolder = workspace:FindFirstChild("NPCs")
                 if npcFolder then
@@ -181,38 +180,30 @@ task.spawn(function()
                             if root and (not hum or hum.Health > 0) then
                                 local dist = (root.Position - hrp.Position).Magnitude
                                 
-                                -- So sánh khoảng cách
+                                -- Tìm con quái gần nhất trong phạm vi thanh Slider
                                 if dist <= closestDistance then
                                     closestDistance = dist
-                                    target = root -- Lưu thẳng bộ phận cơ thể quái để tiện tính toán
+                                    target = npc
+                                    targetRoot = root
                                 end
                             end
                         end
                     end
                 end
                 
-                -- Phát lệnh đánh bằng kỹ thuật SHADOW HIT
-                if target then
-                    -- 1. Lưu lại vị trí thực tế bạn đang đứng
-                    local originalCFrame = hrp.CFrame
+                -- Phát lệnh đánh bằng kỹ thuật KÉO QUÁI
+                if target and targetRoot then
+                    -- 1. Ép con quái dịch chuyển tức thời đến cách mặt bạn 3 studs
+                    targetRoot.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
                     
-                    -- 2. Tắt va chạm tạm thời để lúc bay đi bay về không bị vấp vào đá hay tường
-                    for _, v in pairs(char:GetDescendants()) do
-                        if v:IsA("BasePart") and v.CanCollide then
-                            v.CanCollide = false
-                        end
-                    end
+                    -- 2. Triệt tiêu đà của quái để nó không bị văng đi lung tung
+                    targetRoot.AssemblyLinearVelocity = Vector3.zero
+                    targetRoot.AssemblyAngularVelocity = Vector3.zero
                     
-                    -- 3. Dịch chuyển chớp nhoáng ra sau lưng quái
-                    hrp.CFrame = target.CFrame * CFrame.new(0, 0, 3)
-                    
-                    -- 4. Bắn lệnh chém (Lúc này server sẽ thấy bạn đang ở rất gần quái và đồng ý cho chém)
+                    -- 3. Gửi lệnh chém (Lúc này quái đã ở ngay sát bạn nên Server chắc chắn chấp nhận sát thương)
                     pcall(function()
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
-                    
-                    -- 5. Lập tức giật ngược nhân vật về chỗ cũ
-                    hrp.CFrame = originalCFrame
                 end
             end
         end
