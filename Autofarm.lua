@@ -160,26 +160,15 @@ end)
 -- ==========================================
 local ghostPart = nil
 
+-- ==========================================
+-- VÒNG LẶP 2: KILL AURA (INVISIBLE 1-FRAME PULL)
+-- ==========================================
 task.spawn(function()
     while task.wait() do
         if _G.AutoHitClosest then
             local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
+            if char and char:FindFirstChild("HumanoidRootPart") then
                 local hrp = char.HumanoidRootPart
-                local hum = char.Humanoid
-
-                -- 1. Tạo "Cái bóng" tàng hình và ép Camera nhìn vào cái bóng này thay vì nhân vật
-                if not ghostPart then
-                    ghostPart = Instance.new("Part")
-                    ghostPart.Size = Vector3.new(1, 1, 1)
-                    ghostPart.Transparency = 1
-                    ghostPart.Anchored = true
-                    ghostPart.CanCollide = false
-                    ghostPart.CFrame = hrp.CFrame -- Đứng ngay vị trí hiện tại
-                    ghostPart.Parent = workspace
-                    workspace.CurrentCamera.CameraSubject = ghostPart
-                end
-
                 local closestDistance = _G.HitDistance 
                 local targetRoot = nil
                 
@@ -188,11 +177,11 @@ task.spawn(function()
                     for _, npc in ipairs(npcFolder:GetChildren()) do
                         if npc:IsA("Model") then
                             local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
-                            local npcHum = npc:FindFirstChildOfClass("Humanoid")
+                            local hum = npc:FindFirstChildOfClass("Humanoid")
                             
-                            if root and (not npcHum or npcHum.Health > 0) then
-                                -- Đo khoảng cách từ "Cái bóng" (chỗ Camera đang đứng) đến quái
-                                local dist = (root.Position - ghostPart.Position).Magnitude
+                            -- Nếu quái tồn tại và còn sống
+                            if root and (not hum or hum.Health > 0) then
+                                local dist = (root.Position - hrp.Position).Magnitude
                                 
                                 if dist <= closestDistance then
                                     closestDistance = dist
@@ -203,38 +192,26 @@ task.spawn(function()
                     end
                 end
                 
+                -- Thực hiện kỹ thuật Kéo Quái Tàng Hình (Chỉ người có quyền Client mới làm được)
                 if targetRoot then
-                    -- Tắt va chạm để xác thật bay xuyên tường/vật cản
-                    for _, v in pairs(char:GetDescendants()) do
-                        if v:IsA("BasePart") then v.CanCollide = false end
-                    end
+                    -- 1. Lưu lại tọa độ gốc của con quái để lát nữa trả về
+                    local originalCFrame = targetRoot.CFrame
                     
-                    -- Dịch chuyển xác thật áp sát con quái
-                    hrp.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+                    -- 2. Dịch chuyển con quái ra sát trước mặt bạn
+                    targetRoot.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
                     
-                    -- Gửi lệnh chém (Server thấy bạn đang ở sát quái nên 100% nhận sát thương)
+                    -- 3. Ép hệ thống chờ đúng 1 nhịp vật lý (Heartbeat). 
+                    -- Bước này CỰC KỲ QUAN TRỌNG: Nó cho phép mạng của Roblox kịp gửi vị trí mới của con quái lên Máy chủ!
+                    RunService.Heartbeat:Wait()
+                    
+                    -- 4. Bắn lệnh chém. Lúc này Máy chủ thấy con quái đang ở sát bạn nên nó chấp nhận trừ máu 100%.
                     pcall(function()
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
-                else
-                    -- Không có quái thì xác thật bay về đứng chung với cái bóng
-                    hrp.CFrame = ghostPart.CFrame
+                    
+                    -- 5. Trả ngay con quái về chỗ cũ trước khi mắt người chơi kịp nhận ra
+                    targetRoot.CFrame = originalCFrame
                 end
-            end
-        else
-            -- 2. Khôi phục lại trạng thái bình thường khi tắt Auto Hit
-            if ghostPart then
-                local char = LocalPlayer.Character
-                if char and char:FindFirstChild("Humanoid") then
-                    -- Kéo xác thật về lại vị trí đang nhìn
-                    if char:FindFirstChild("HumanoidRootPart") then
-                        char.HumanoidRootPart.CFrame = ghostPart.CFrame
-                    end
-                    -- Trả lại Camera theo dõi nhân vật
-                    workspace.CurrentCamera.CameraSubject = char.Humanoid
-                end
-                ghostPart:Destroy()
-                ghostPart = nil
             end
         end
     end
