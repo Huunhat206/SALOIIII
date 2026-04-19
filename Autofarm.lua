@@ -161,7 +161,7 @@ end)
 local ghostPart = nil
 
 -- ==========================================
--- VÒNG LẶP 2: KILL AURA (INVISIBLE 1-FRAME PULL)
+-- VÒNG LẶP 2: KILL AURA (LOCAL POSITION SPOOFING)
 -- ==========================================
 task.spawn(function()
     while task.wait() do
@@ -179,10 +179,8 @@ task.spawn(function()
                             local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
                             local hum = npc:FindFirstChildOfClass("Humanoid")
                             
-                            -- Nếu quái tồn tại và còn sống
                             if root and (not hum or hum.Health > 0) then
                                 local dist = (root.Position - hrp.Position).Magnitude
-                                
                                 if dist <= closestDistance then
                                     closestDistance = dist
                                     targetRoot = root
@@ -192,25 +190,21 @@ task.spawn(function()
                     end
                 end
                 
-                -- Thực hiện kỹ thuật Kéo Quái Tàng Hình (Chỉ người có quyền Client mới làm được)
                 if targetRoot then
-                    -- 1. Lưu lại tọa độ gốc của con quái để lát nữa trả về
-                    local originalCFrame = targetRoot.CFrame
+                    -- BÍ QUYẾT: Chỉ thay đổi CFrame đúng lúc FireServer rồi trả lại ngay lập tức
+                    -- Việc này diễn ra nhanh đến mức Engine đồ họa không kịp vẽ (Render) cảnh bạn bị dịch chuyển
+                    local oldCFrame = hrp.CFrame
                     
-                    -- 2. Dịch chuyển con quái ra sát trước mặt bạn
-                    targetRoot.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
+                    -- Ép tọa độ nhân vật đến sát con quái (Chỉ ở mức dữ liệu gửi đi)
+                    hrp.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 2)
                     
-                    -- 3. Ép hệ thống chờ đúng 1 nhịp vật lý (Heartbeat). 
-                    -- Bước này CỰC KỲ QUAN TRỌNG: Nó cho phép mạng của Roblox kịp gửi vị trí mới của con quái lên Máy chủ!
-                    RunService.Heartbeat:Wait()
-                    
-                    -- 4. Bắn lệnh chém. Lúc này Máy chủ thấy con quái đang ở sát bạn nên nó chấp nhận trừ máu 100%.
+                    -- Gửi lệnh chém (Server nhận được tọa độ đã áp sát nên sẽ tính Damage)
                     pcall(function()
                         ReplicatedStorage:WaitForChild("CombatSystem"):WaitForChild("Remotes"):WaitForChild("RequestHit"):FireServer()
                     end)
                     
-                    -- 5. Trả ngay con quái về chỗ cũ trước khi mắt người chơi kịp nhận ra
-                    targetRoot.CFrame = originalCFrame
+                    -- Trả lại tọa độ cũ ngay lập tức để bạn không bị khựng hay tele trên màn hình
+                    hrp.CFrame = oldCFrame
                 end
             end
         end
