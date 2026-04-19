@@ -4,6 +4,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
+-- ==========================================
+-- HÀM DỊCH CHUYỂN TỨC THỜI (ANTI-RUBBERBAND)
+-- ==========================================
 local function BypassInstantTeleport(targetCFrame)
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
@@ -15,28 +18,34 @@ local function BypassInstantTeleport(targetCFrame)
     local args = { Vector3.new(direction.X, 0, direction.Z), 33, false }
     local dashRemote = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("DashRemote")
     
-    -- Dịch chuyển tức thời
+    -- 1. Triệt tiêu quán tính để tránh lỗi vật lý
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+    
+    -- 2. Đóng băng nhân vật
+    hrp.Anchored = true
+    
+    -- 3. Bắn tín hiệu Dash đánh lừa server lần 1
+    pcall(function() dashRemote:FireServer(unpack(args)) end)
+    
+    -- 4. Dịch chuyển
     hrp.CFrame = targetCFrame
     
-    -- Lần Dash 1 (Đánh lừa đợt 1)
-    pcall(function()
-        dashRemote:FireServer(unpack(args))
-    end)
+    -- 5. Nghỉ để server đồng bộ
+    task.wait(0.15)
     
-    -- Nghỉ nửa nhịp để server ghi nhận, sau đó neo lại vị trí chống trượt
+    -- 6. Bắn Dash lần 2 chốt vị trí mới
+    pcall(function() dashRemote:FireServer(unpack(args)) end)
+    hrp.CFrame = targetCFrame
+    
+    -- 7. Thả băng
     task.wait(0.05)
-    hrp.CFrame = targetCFrame
-    
-    -- Lần Dash 2 (Chốt hạ qua mặt Anti-Cheat)
-    pcall(function()
-        dashRemote:FireServer(unpack(args))
-    end)
-    
-    -- Đợi hoạt ảnh dash xong và chốt vị trí lần cuối cùng
-    task.wait(0.1)
-    hrp.CFrame = targetCFrame
+    hrp.Anchored = false
 end
 
+-- ==========================================
+-- DANH SÁCH ĐẢO
+-- ==========================================
 local islandMap = {
     ["Starter Island"] = "StarterIsland", ["Jungle Island"] = "JungleIsland", ["Desert Island"] = "DesertIsland",
     ["Snow Island"] = "SnowIsland", ["Sailor Island"] = "SailorIsland", ["Shibuya Station"] = "ShibuyaStation",
@@ -51,6 +60,9 @@ local fullIslandList = {}
 for name, _ in pairs(islandMap) do table.insert(fullIslandList, name) end
 table.sort(fullIslandList) 
 
+-- ==========================================
+-- GIAO DIỆN
+-- ==========================================
 local TeleportTab = Window:CreateTab("🌍 Dịch Chuyển", 4483362458)
 local IslandDropdown 
 
