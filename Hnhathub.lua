@@ -399,11 +399,11 @@ function Library:CreateWindow(options)
     self.Window = window
 
 -- =========================================================================
-    -- NÚT BẬT/TẮT LOGO (Ô VUÔNG CHÈN ẢNH) - BẢN FIX CÓ BẢO HIỂM
+    -- NÚT BẬT/TẮT LOGO (BẢN FIX BẤT TỬ - CHẮC CHẮN HIỆN)
     -- =========================================================================
     
-    -- 1. Tạo nút Logo (Ô vuông)
-    local openButton = create("ImageButton", {
+    -- 1. Nút gốc: Là nút CHỮ (TextButton) để đảm bảo luôn hiện chữ "S" nếu ảnh xịt
+    local openButton = create("TextButton", {
         Parent = rootGui,
         Name = "OpenLogoButton",
         Size = UDim2.fromOffset(50, 50),
@@ -411,44 +411,45 @@ function Library:CreateWindow(options)
         BackgroundColor3 = Theme.Panel,
         AutoButtonColor = true,
         Visible = false,
+        Text = "S", -- Chữ S màu cam mặc định
+        TextColor3 = Theme.Accent,
+        TextSize = 24,
+        Font = Enum.Font.GothamBold,
         ZIndex = 9999,
-        Image = "102577118163269", -- NẾU BẠN LÀM THEO CÁCH 1, HÃY DÁN ID ROBLOX VÀO ĐÂY (VD: "rbxassetid://123456789")
     })
     addCorner(openButton, 10)
     addStroke(openButton, Theme.Accent, 2, 0)
 
-    -- 2. Chữ "S" bảo hiểm (Phòng khi ảnh bị lỗi thì vẫn có nút để bấm)
-    local fallbackText = create("TextLabel", {
+    -- 2. Lớp ảnh đè lên trên (Mặc định trong suốt)
+    local logoImage = create("ImageLabel", {
         Parent = openButton,
-        Size = UDim2.new(1, 0, 1, 0),
+        Size = UDim2.fromScale(1, 1),
         BackgroundTransparency = 1,
-        Text = "S",
-        TextColor3 = Theme.Accent,
-        TextSize = 28,
-        Font = Fonts.Title,
+        Image = "", -- Nếu có ID Roblox thì dán thẳng vào đây (VD: "rbxassetid://123456789")
         ZIndex = 10000
     })
+    addCorner(logoImage, 10)
 
-    -- 3. Thử tải ảnh từ GitHub ngầm bên dưới
+    -- 3. Tải ảnh ngầm từ GitHub
     task.spawn(function()
         pcall(function()
             local rawUrl = "https://raw.githubusercontent.com/Huunhat206/SALOIIII/main/Saloi.png"
-            local fileName = "SaloiLogo.png"
+            local fileName = "SaloiLogo_Fix.png"
             if not isfile(fileName) then
                 writefile(fileName, game:HttpGet(rawUrl))
             end
             local asset = getcustomasset(fileName)
             if asset and asset ~= "" then
-                openButton.Image = asset
-                fallbackText.Visible = false -- Nếu ảnh load thành công thì ẩn chữ "S" đi
+                logoImage.Image = asset
+                openButton.Text = "" -- Tải ảnh thành công thì xóa chữ S đi
             end
         end)
     end)
     
-    -- Kéo thả nút Logo
+    -- Kéo thả nút
     makeDraggable(openButton, openButton, self)
 
-    -- Hiệu ứng hover cho nút Logo
+    -- Hiệu ứng hover
     openButton.MouseEnter:Connect(function() tween(openButton, { Size = UDim2.fromOffset(55, 55) }, TweenInfo.new(0.1)) end)
     openButton.MouseLeave:Connect(function() tween(openButton, { Size = UDim2.fromOffset(50, 50) }, TweenInfo.new(0.1)) end)
 
@@ -462,19 +463,18 @@ function Library:CreateWindow(options)
         tween(root, { Size = startWindowSize }, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
         task.wait(0.2)
         root.Visible = false
-        openButton.Visible = true -- Hiện Logo lên
+        openButton.Visible = true -- Hiện nút Logo lên
     end)
 
     -- BẤM LOGO ĐỂ PHÓNG TO LẠI HUB
     openButton.MouseButton1Click:Connect(function()
-        openButton.Visible = false -- Tắt Logo
+        openButton.Visible = false -- Tắt nút Logo
         root.Visible = true
         tween(blur, { Size = 18 }, TweenInfo.new(0.25))
         tween(overlay, { BackgroundTransparency = 0.4 }, TweenInfo.new(0.2))
         tween(root, { Size = finalWindowSize }, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
     end)
     -- =========================================================================
-
     -- Animation lúc mới bật script
     tween(blur, { Size = 18 }, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
     tween(overlay, { BackgroundTransparency = 0.4 }, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
