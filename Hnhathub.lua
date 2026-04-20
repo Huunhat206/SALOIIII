@@ -399,36 +399,51 @@ function Library:CreateWindow(options)
     self.Window = window
 
 -- =========================================================================
-    -- NÚT BẬT/TẮT LOGO (Ô VUÔNG CHÈN ẢNH) - TẢI TRỰC TIẾP TỪ GITHUB
+    -- NÚT BẬT/TẮT LOGO (Ô VUÔNG CHÈN ẢNH) - BẢN FIX CÓ BẢO HIỂM
     -- =========================================================================
     
-    -- 1. Tự động tải ảnh từ GitHub raw link và ép thành Asset ID
-    local logoAsset = ""
-    pcall(function()
-        local rawUrl = "https://raw.githubusercontent.com/Huunhat206/SALOIIII/main/Saloi.png"
-        local fileName = "SaloiLogo.png"
-        -- Nếu chưa có ảnh trong máy thì tải về
-        if not isfile(fileName) then
-            writefile(fileName, game:HttpGet(rawUrl))
-        end
-        -- Biến ảnh thành ID cục bộ
-        logoAsset = getcustomasset(fileName)
-    end)
-
-    -- 2. Tạo nút Logo
+    -- 1. Tạo nút Logo (Ô vuông)
     local openButton = create("ImageButton", {
         Parent = rootGui,
         Name = "OpenLogoButton",
         Size = UDim2.fromOffset(50, 50),
-        Position = UDim2.new(0, 20, 0, 20), -- Vị trí lúc mới hiện (Góc trái)
+        Position = UDim2.new(0, 20, 0, 20),
         BackgroundColor3 = Theme.Panel,
         AutoButtonColor = true,
         Visible = false,
         ZIndex = 9999,
-        Image = logoAsset, -- Gọi ID ảnh vừa tải ở trên vào đây
+        Image = "102577118163269", -- NẾU BẠN LÀM THEO CÁCH 1, HÃY DÁN ID ROBLOX VÀO ĐÂY (VD: "rbxassetid://123456789")
     })
     addCorner(openButton, 10)
     addStroke(openButton, Theme.Accent, 2, 0)
+
+    -- 2. Chữ "S" bảo hiểm (Phòng khi ảnh bị lỗi thì vẫn có nút để bấm)
+    local fallbackText = create("TextLabel", {
+        Parent = openButton,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "S",
+        TextColor3 = Theme.Accent,
+        TextSize = 28,
+        Font = Fonts.Title,
+        ZIndex = 10000
+    })
+
+    -- 3. Thử tải ảnh từ GitHub ngầm bên dưới
+    task.spawn(function()
+        pcall(function()
+            local rawUrl = "https://raw.githubusercontent.com/Huunhat206/SALOIIII/main/Saloi.png"
+            local fileName = "SaloiLogo.png"
+            if not isfile(fileName) then
+                writefile(fileName, game:HttpGet(rawUrl))
+            end
+            local asset = getcustomasset(fileName)
+            if asset and asset ~= "" then
+                openButton.Image = asset
+                fallbackText.Visible = false -- Nếu ảnh load thành công thì ẩn chữ "S" đi
+            end
+        end)
+    end)
     
     -- Kéo thả nút Logo
     makeDraggable(openButton, openButton, self)
