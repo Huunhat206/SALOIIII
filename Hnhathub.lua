@@ -398,9 +398,24 @@ function Library:CreateWindow(options)
 
     self.Window = window
 
+-- =========================================================================
+    -- NÚT BẬT/TẮT LOGO (Ô VUÔNG CHÈN ẢNH) - TẢI TRỰC TIẾP TỪ GITHUB
     -- =========================================================================
-    -- NÚT BẬT/TẮT LOGO (Ô VUÔNG CHÈN ẢNH) - KÉO THẢ ĐƯỢC
-    -- =========================================================================
+    
+    -- 1. Tự động tải ảnh từ GitHub raw link và ép thành Asset ID
+    local logoAsset = ""
+    pcall(function()
+        local rawUrl = "https://raw.githubusercontent.com/Huunhat206/SALOIIII/main/Saloi.png"
+        local fileName = "SaloiLogo.png"
+        -- Nếu chưa có ảnh trong máy thì tải về
+        if not isfile(fileName) then
+            writefile(fileName, game:HttpGet(rawUrl))
+        end
+        -- Biến ảnh thành ID cục bộ
+        logoAsset = getcustomasset(fileName)
+    end)
+
+    -- 2. Tạo nút Logo
     local openButton = create("ImageButton", {
         Parent = rootGui,
         Name = "OpenLogoButton",
@@ -410,8 +425,7 @@ function Library:CreateWindow(options)
         AutoButtonColor = true,
         Visible = false,
         ZIndex = 9999,
-        -- BẠN HÃY DÁN ID ẢNH CỦA BẠN VÀO DÒNG BÊN DƯỚI (VD: "rbxassetid://123456789")
-        Image = "https://github.com/Huunhat206/SALOIIII/blob/main/Saloi.png", 
+        Image = logoAsset, -- Gọi ID ảnh vừa tải ở trên vào đây
     })
     addCorner(openButton, 10)
     addStroke(openButton, Theme.Accent, 2, 0)
