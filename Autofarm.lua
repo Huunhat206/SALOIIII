@@ -1,194 +1,389 @@
-local Window, Rayfield = ... -- Nhận giao diện từ Hnhathub.lua
+local Window, Library = ...
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
 local LocalPlayer = Players.LocalPlayer
+local env = getgenv and getgenv() or _G
+env.SALOI_HUB = env.SALOI_HUB or {}
 
--- Khởi tạo biến toàn cục
-_G.AutoFarm = false
-_G.SelectedNPC = "None"
-_G.AutoHitClosest = false
-_G.HitDistance = 250
+local Hub = env.SALOI_HUB
+Hub.State = Hub.State or {}
+Hub.Runtime = Hub.Runtime or {}
+Hub.Helpers = Hub.Helpers or {}
 
--- ==========================================
--- HÀM HỖ TRỢ (UTILITIES)
--- ==========================================
+local State = Hub.State
+State.AutoFarm = State.AutoFarm or false
+State.SelectedNPC = State.SelectedNPC or "None"
+State.AutoHitClosest = State.AutoHitClosest or false
+State.HitDistance = State.HitDistance or 250
+State.FarmOffset = State.FarmOffset or 3
+
+local Runtime = Hub.Runtime
+local Helpers = Hub.Helpers
+
+local function notify(title, content, duration)
+    if Helpers.Notify then
+        Helpers.Notify(title, content, duration)
+        return
+    end
+
+    pcall(function()
+        Library:Notify({
+            Title = title,
+            Content = content,
+            Duration = duration or 4,
+        })
+    end)
+end
+
+local function replaceConnection(key, connection)
+    if Helpers.ReplaceConnection then
+        return Helpers.ReplaceConnection(key, connection)
+    end
+
+    Runtime[key] = Runtime[key] or {}
+    local previous = Runtime[key].Connection
+    if previous then
+        pcall(function()
+            previous:Disconnect()
+        end)
+    end
+
+    Runtime[key].Connection = connection
+    return connection
+end
+
+local function bumpToken(key)
+    if Helpers.BumpToken then
+        return Helpers.BumpToken(key)
+    end
+
+    Runtime.Tokens = Runtime.Tokens or {}
+    Runtime.Tokens[key] = (Runtime.Tokens[key] or 0) + 1
+    return Runtime.Tokens[key]
+end
+
+local function isTokenActive(key, token)
+    if Helpers.IsTokenActive then
+        return Helpers.IsTokenActive(key, token)
+    end
+
+    Runtime.Tokens = Runtime.Tokens or {}
+    return Runtime.Tokens[key] == token
+end
+
 local function getBaseName(name)
-    local baseName = string.gsub(name, "%d+$", "") 
-    return string.match(baseName, "^%s*(.-)%s*$") 
+    local baseName = string.gsub(name, "%d+$", "")
+    return string.match(baseName, "^%s*(.-)%s*$")
+end
+
+local function getNPCFolder()
+    return workspace:FindFirstChild("NPCs")
 end
 
 local function getNPCList()
-    local list = {}
-    local dict = {}
-    local npcFolder = workspace:FindFirstChild("NPCs")
+    local names = {}
+    local seen = {}
+    local npcFolder = getNPCFolder()
+
     if npcFolder then
         for _, npc in ipairs(npcFolder:GetChildren()) do
             if npc:IsA("Model") then
                 local baseName = getBaseName(npc.Name)
-                if not dict[baseName] then
-                    dict[baseName] = true
-                    table.insert(list, baseName)
+                if baseName ~= "" and not seen[baseName] then
+                    seen[baseName] = true
+                    table.insert(names, baseName)
                 end
             end
         end
     end
-    table.sort(list)
-    if #list == 0 then table.insert(list, "None") end
-    return list
+
+    table.sort(names)
+
+    if #names == 0 then
+        names[1] = "None"
+    end
+
+    return names
+end
+
+local function getHitRemote()
+    local combatSystem = ReplicatedStorage:FindFirstChild("CombatSystem")
+    local remotes = combatSystem and combatSystem:FindFirstChild("Remotes")
+    return remotes and remotes:FindFirstChild("RequestHit")
+end
+
+local function requestHit()
+    local remote = getHitRemote()
+    if not remote then
+        return
+    end
+
+    pcall(function()
+        remote:FireServer()
+    end)
+end
+
+local function getValidRoot(npc)
+    local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
+    local humanoid = npc:FindFirstChildOfClass("Humanoid")
+
+    if not root then
+        return nil
+    end
+
+    if humanoid and humanoid.Health <= 0 then
+        return nil
+    end
+
+    return root
+end
+
+local function findClosestTargetByName(targetName, originPosition)
+    local npcFolder = getNPCFolder()
+    if not npcFolder then
+        return nil
+    end
+
+    local closestRoot
+    local closestDistance = math.huge
+
+    for _, npc in ipairs(npcFolder:GetChildren()) do
+        if npc:IsA("Model") and getBaseName(npc.Name) == targetName then
+            local root = getValidRoot(npc)
+            if root then
+                local distance = (root.Position - originPosition).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestRoot = root
+                end
+            end
+        end
+    end
+
+    return closestRoot
+end
+
+local function findClosestAliveNPC(originPosition, maxDistance)
+    local npcFolder = getNPCFolder()
+    if not npcFolder then
+        return nil
+    end
+
+    local closestRoot
+    local closestDistance = maxDistance or math.huge
+
+    for _, npc in ipairs(npcFolder:GetChildren()) do
+        if npc:IsA("Model") then
+            local root = getValidRoot(npc)
+            if root then
+                local distance = (root.Position - originPosition).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestRoot = root
+                end
+            end
+        end
+    end
+
+    return closestRoot
+end
+
+local function getDropdownValue(option)
+    if type(option) == "table" then
+        return option[1]
+    end
+
+    return option
 end
 
 local fullNPCList = getNPCList()
-local MainTab = Window:CreateTab("🗡️ Auto Farm", 4483362458)
-local NPCDropdown 
+local initialNPC = State.SelectedNPC
+local hasInitialNPC = false
 
--- ==========================================
--- 1. GIAO DIỆN: FARM THEO MỤC TIÊU
--- ==========================================
-MainTab:CreateSection("Farm Theo Mục Tiêu")
-
-MainTab:CreateInput({
-   Name = "🔍 Tìm kiếm NPC",
-   PlaceholderText = "Nhập tên quái...",
-   RemoveTextAfterFocusLost = false,
-   Callback = function(Text)
-       local filteredList = {}
-       if Text == "" then
-           filteredList = fullNPCList
-       else
-           for _, npc in ipairs(fullNPCList) do
-               if string.find(string.lower(npc), string.lower(Text), 1, true) then
-                   table.insert(filteredList, npc)
-               end
-           end
-       end
-       if NPCDropdown then NPCDropdown:Refresh(filteredList, true) end
-   end,
-})
-
-NPCDropdown = MainTab:CreateDropdown({
-   Name = "🎯 Chọn mục tiêu (NPC)",
-   Options = fullNPCList,
-   CurrentOption = {"None"},
-   MultipleOptions = false,
-   Flag = "NPCDropdown", 
-   Callback = function(Option)
-       if Option[1] ~= "Không tìm thấy" then _G.SelectedNPC = Option[1] end
-   end,
-})
-
-MainTab:CreateButton({
-   Name = "🔄 Tải lại danh sách NPC",
-   Callback = function()
-       fullNPCList = getNPCList()
-       NPCDropdown:Refresh(fullNPCList, true)
-       Rayfield:Notify({Title = "Thành công", Content = "Đã cập nhật NPC!", Duration = 3})
-   end,
-})
-
-MainTab:CreateToggle({
-   Name = "⚡ Bật Auto Farm (Teleport)",
-   CurrentValue = false,
-   Flag = "AutoFarmToggle", 
-   Callback = function(Value)
-       _G.AutoFarm = Value
-   end,
-})
-
--- ==========================================
--- 2. GIAO DIỆN: KILL AURA (VIP MODE)
--- ==========================================
-MainTab:CreateSection("Kill Aura (Đánh Xung Quanh)")
-
-MainTab:CreateToggle({
-   Name = "⚔️ Auto Hit Closest Mob",
-   CurrentValue = false,
-   Flag = "AutoHitToggle", 
-   Callback = function(Value)
-       _G.AutoHitClosest = Value
-   end,
-})
-
-MainTab:CreateSlider({
-   Name = "📏 Hit Distance",
-   Range = {10, 500},
-   Increment = 10,
-   Suffix = " Studs",
-   CurrentValue = 250,
-   Flag = "HitDistanceSlider",
-   Callback = function(Value)
-       _G.HitDistance = Value
-   end,
-})
-
--- ==========================================
--- VÒNG LẶP XỬ LÝ (CORE LOGIC)
--- ==========================================
-
--- Vòng lặp chính sử dụng Heartbeat để đảm bảo tốc độ nháy tọa độ không bị lộ
-RunService.Heartbeat:Connect(function()
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    -- Xử lý Kill Aura (Đánh quanh vị trí hiện tại)
-    if _G.AutoHitClosest then
-        local targetRoot = nil
-        local shortestDist = _G.HitDistance
-        
-        local npcFolder = workspace:FindFirstChild("NPCs")
-        if npcFolder then
-            for _, npc in ipairs(npcFolder:GetChildren()) do
-                local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
-                local hum = npc:FindFirstChildOfClass("Humanoid")
-                if root and (not hum or hum.Health > 0) then
-                    local dist = (root.Position - hrp.Position).Magnitude
-                    if dist < shortestDist then
-                        shortestDist = dist
-                        targetRoot = root
-                    end
-                end
-            end
-        end
-
-        if targetRoot then
-            -- Kỹ thuật nháy tọa độ trong 1 frame
-            local oldCF = hrp.CFrame
-            hrp.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
-            
-            pcall(function()
-                ReplicatedStorage.CombatSystem.Remotes.RequestHit:FireServer()
-            end)
-            
-            hrp.CFrame = oldCF -- Trả về ngay lập tức để không bị tele trên màn hình
-        end
+for _, npcName in ipairs(fullNPCList) do
+    if npcName == initialNPC then
+        hasInitialNPC = true
+        break
     end
-end)
+end
 
--- Vòng lặp Auto Farm (Dùng cho việc bay đi farm quái cụ thể)
-task.spawn(function()
-    while task.wait() do
-        if _G.AutoFarm and _G.SelectedNPC and _G.SelectedNPC ~= "None" then
-            local npcFolder = workspace:FindFirstChild("NPCs")
-            if npcFolder then
-                for _, npc in ipairs(npcFolder:GetChildren()) do
-                    if getBaseName(npc.Name) == _G.SelectedNPC then
-                        local root = npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
-                        local hum = npc:FindFirstChildOfClass("Humanoid")
-                        if root and (not hum or hum.Health > 0) then
-                            local char = LocalPlayer.Character
-                            if char and char:FindFirstChild("HumanoidRootPart") then
-                                char.HumanoidRootPart.CFrame = root.CFrame * CFrame.new(0, 0, 3)
-                                pcall(function()
-                                    ReplicatedStorage.CombatSystem.Remotes.RequestHit:FireServer()
-                                end)
-                            end
-                            break
-                        end
-                    end
+if not hasInitialNPC then
+    initialNPC = fullNPCList[1] or "None"
+    State.SelectedNPC = initialNPC
+end
+
+local AutoFarmTab = Window:CreateTab("⚔️ Auto Farm", 4483362458)
+local NPCDropdown
+
+AutoFarmTab:CreateParagraph({
+    Title = "Farm Hub",
+    Content = "Chon quái theo ten de farm on dinh hoac bat Kill Aura de danh mob gan nhat.",
+})
+
+AutoFarmTab:CreateSection("Target Farm")
+
+AutoFarmTab:CreateInput({
+    Name = "🔎 Tim NPC",
+    PlaceholderText = "Nhap ten quai...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(text)
+        local filtered = {}
+        local keyword = string.lower(text or "")
+
+        if keyword == "" then
+            filtered = fullNPCList
+        else
+            for _, npcName in ipairs(fullNPCList) do
+                if string.find(string.lower(npcName), keyword, 1, true) then
+                    table.insert(filtered, npcName)
                 end
             end
         end
+
+        if #filtered == 0 then
+            filtered[1] = "Không tìm thấy"
+        end
+
+        if NPCDropdown then
+            NPCDropdown:Refresh(filtered, true)
+        end
+    end,
+})
+
+NPCDropdown = AutoFarmTab:CreateDropdown({
+    Name = "🎯 Chon muc tieu",
+    Options = fullNPCList,
+    CurrentOption = { initialNPC },
+    MultipleOptions = false,
+    Flag = "SALOI_SelectedNPC",
+    Callback = function(option)
+        local selected = getDropdownValue(option)
+        if selected and selected ~= "Không tìm thấy" then
+            State.SelectedNPC = selected
+        end
+    end,
+})
+
+AutoFarmTab:CreateButton({
+    Name = "🔄 Tai lai danh sach NPC",
+    Callback = function()
+        fullNPCList = getNPCList()
+        if NPCDropdown then
+            NPCDropdown:Refresh(fullNPCList, true)
+        end
+
+        if State.SelectedNPC ~= "None" then
+            local found = false
+            for _, npcName in ipairs(fullNPCList) do
+                if npcName == State.SelectedNPC then
+                    found = true
+                    break
+                end
+            end
+
+            if not found then
+                State.SelectedNPC = "None"
+            end
+        end
+
+        notify("Auto Farm", "Da cap nhat danh sach NPC.", 4)
+    end,
+})
+
+AutoFarmTab:CreateToggle({
+    Name = "⚡ Bat Auto Farm",
+    CurrentValue = State.AutoFarm,
+    Flag = "SALOI_AutoFarm",
+    Callback = function(value)
+        State.AutoFarm = value
+    end,
+})
+
+AutoFarmTab:CreateSlider({
+    Name = "📍 Do lech dung farm",
+    Range = { 2, 8 },
+    Increment = 1,
+    Suffix = " Studs",
+    CurrentValue = State.FarmOffset,
+    Flag = "SALOI_FarmOffset",
+    Callback = function(value)
+        State.FarmOffset = value
+    end,
+})
+
+AutoFarmTab:CreateSection("Kill Aura")
+
+AutoFarmTab:CreateToggle({
+    Name = "⚔️ Auto Hit Closest Mob",
+    CurrentValue = State.AutoHitClosest,
+    Flag = "SALOI_AutoHitClosest",
+    Callback = function(value)
+        State.AutoHitClosest = value
+    end,
+})
+
+AutoFarmTab:CreateSlider({
+    Name = "📏 Hit Distance",
+    Range = { 25, 500 },
+    Increment = 5,
+    Suffix = " Studs",
+    CurrentValue = State.HitDistance,
+    Flag = "SALOI_HitDistance",
+    Callback = function(value)
+        State.HitDistance = value
+    end,
+})
+
+AutoFarmTab:CreateLabel("Meo: neu chua chon NPC, Auto Farm se uu tien mob gan nhat.")
+
+local auraToken = bumpToken("AutoFarm_Aura")
+replaceConnection("AutoFarm_Aura", RunService.Heartbeat:Connect(function()
+    if not isTokenActive("AutoFarm_Aura", auraToken) or not State.AutoHitClosest then
+        return
+    end
+
+    local character = LocalPlayer.Character
+    local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        return
+    end
+
+    local targetRoot = findClosestAliveNPC(humanoidRootPart.Position, State.HitDistance)
+    if not targetRoot then
+        return
+    end
+
+    local oldCFrame = humanoidRootPart.CFrame
+    humanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, State.FarmOffset)
+    requestHit()
+    humanoidRootPart.CFrame = oldCFrame
+end))
+
+local farmToken = bumpToken("AutoFarm_Loop")
+task.spawn(function()
+    while isTokenActive("AutoFarm_Loop", farmToken) do
+        if State.AutoFarm then
+            local character = LocalPlayer.Character
+            local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+
+            if humanoidRootPart then
+                local targetRoot
+                if State.SelectedNPC and State.SelectedNPC ~= "None" then
+                    targetRoot = findClosestTargetByName(State.SelectedNPC, humanoidRootPart.Position)
+                else
+                    targetRoot = findClosestAliveNPC(humanoidRootPart.Position)
+                end
+
+                if targetRoot then
+                    humanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, State.FarmOffset)
+                    requestHit()
+                end
+            end
+        end
+
+        task.wait(0.12)
     end
 end)
