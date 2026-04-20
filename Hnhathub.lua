@@ -400,8 +400,15 @@ local function makePanel(parent, properties)
     local props = {}
     for k, v in pairs(properties or {}) do props[k] = v end
     props.Parent = parent 
+    
+    -- FIX: Lấy CornerRadius ra và xóa khỏi props để không gán vào Frame
+    local radius = props.CornerRadius
+    props.CornerRadius = nil
+    
     local panel = create("Frame", props)
-    addCorner(panel, props.CornerRadius or 14)
+    
+    -- Áp dụng CornerRadius thông qua UICorner
+    addCorner(panel, radius or 14)
     addStroke(panel, Theme.Border, 1, 0.3)
     return panel
 end
