@@ -411,7 +411,7 @@ function Library:CreateWindow(options)
         Visible = false,
         ZIndex = 9999,
         -- BẠN HÃY DÁN ID ẢNH CỦA BẠN VÀO DÒNG BÊN DƯỚI (VD: "rbxassetid://123456789")
-        Image = "", 
+        Image = "https://github.com/Huunhat206/SALOIIII/blob/main/Saloi.png", 
     })
     addCorner(openButton, 10)
     addStroke(openButton, Theme.Accent, 2, 0)
