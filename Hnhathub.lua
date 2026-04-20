@@ -72,7 +72,6 @@ local Theme = {
     AccentSoft = Color3.fromRGB(255, 181, 140),
     Success = Color3.fromRGB(95, 219, 138),
     Error = Color3.fromRGB(255, 95, 95),
-    Shadow = Color3.fromRGB(0, 0, 0),
 }
 
 local Fonts = {
@@ -192,12 +191,10 @@ local function makeDraggable(handle, target, library)
     end)
 end
 
--- BẢN FIX 1: Tối giản hóa hàm MakePanel, loại bỏ UIGradient để tránh lỗi Engine Render của Executor
 local function makePanel(parent, properties)
     local props = {}
     for k, v in pairs(properties or {}) do props[k] = v end
     props.Parent = parent 
-    
     local panel = create("Frame", props)
     addCorner(panel, props.CornerRadius or 12)
     addStroke(panel, Theme.Border, 1, 0.25)
@@ -316,11 +313,8 @@ end
 function Library:CreateWindow(options)
     self:EnsureNotifications()
 
-    -- Kích thước cố định an toàn
     local finalWindowSize = IsMobile and UDim2.fromOffset(650, 380) or UDim2.fromOffset(800, 450)
     local startWindowSize = IsMobile and UDim2.fromOffset(600, 350) or UDim2.fromOffset(750, 400)
-    local finalShadowSize = IsMobile and UDim2.fromOffset(690, 420) or UDim2.fromOffset(840, 490)
-    local startShadowSize = IsMobile and UDim2.fromOffset(640, 390) or UDim2.fromOffset(790, 440)
 
     local rootGui = create("ScreenGui", { Parent = safeGetUI(), Name = "SaloiHub", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 9998 })
     self.RootGui = rootGui
@@ -328,16 +322,8 @@ function Library:CreateWindow(options)
     local blur = create("BlurEffect", { Parent = Lighting, Name = "SaloiHubBlur", Size = 0 })
     self.Blur = blur
 
-    -- BẢN FIX 2: Ép cứng ZIndex tránh bị đè lớp
-    local overlay = create("Frame", { Parent = rootGui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Theme.Shadow, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1 })
+    local overlay = create("Frame", { Parent = rootGui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1 })
 
-    local shadow = create("ImageLabel", {
-        Parent = rootGui, Name = "Shadow", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
-        Size = startShadowSize, BackgroundTransparency = 1, BorderSizePixel = 0, Image = "rbxassetid://1316045217",
-        ImageColor3 = Theme.Shadow, ImageTransparency = 1, ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(10, 10, 118, 118), ZIndex = 2,
-    })
-
-    -- BẢN FIX 3: Set cứng BackgroundTransparency = 0, gỡ UIScale
     local root = makePanel(rootGui, {
         Name = "Root", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
         Size = startWindowSize, BackgroundColor3 = Theme.Background, BackgroundTransparency = 0,
@@ -405,22 +391,65 @@ function Library:CreateWindow(options)
     local pagesHolder = create("Frame", { Parent = contentHolder, Name = "PagesHolder", Position = UDim2.new(0, 0, 0, 60), Size = UDim2.new(1, 0, 1, -60), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 12 })
 
     local window = setmetatable({
-        Library = self, Root = root, Shadow = shadow, Sidebar = sidebar, TabScroller = tabScroller, TabLayout = tabLayout,
+        Library = self, Root = root, Sidebar = sidebar, TabScroller = tabScroller, TabLayout = tabLayout,
         PagesHolder = pagesHolder, HeaderTitle = headerTitle, HeaderSubtitle = headerSubtitle, Tabs = {}, ActiveTab = nil,
         WindowName = options.Name or "Saloi Hub", WindowSubtitle = options.Subtitle or "Custom local UI",
     }, WindowClass)
 
     self.Window = window
 
+    -- =========================================================================
+    -- NÚT BẬT/TẮT LOGO (Ô VUÔNG CHÈN ẢNH) - KÉO THẢ ĐƯỢC
+    -- =========================================================================
+    local openButton = create("ImageButton", {
+        Parent = rootGui,
+        Name = "OpenLogoButton",
+        Size = UDim2.fromOffset(50, 50),
+        Position = UDim2.new(0, 20, 0, 20), -- Vị trí lúc mới hiện (Góc trái)
+        BackgroundColor3 = Theme.Panel,
+        AutoButtonColor = true,
+        Visible = false,
+        ZIndex = 9999,
+        -- BẠN HÃY DÁN ID ẢNH CỦA BẠN VÀO DÒNG BÊN DƯỚI (VD: "rbxassetid://123456789")
+        Image = "", 
+    })
+    addCorner(openButton, 10)
+    addStroke(openButton, Theme.Accent, 2, 0)
+    
+    -- Kéo thả nút Logo
+    makeDraggable(openButton, openButton, self)
+
+    -- Hiệu ứng hover cho nút Logo
+    openButton.MouseEnter:Connect(function() tween(openButton, { Size = UDim2.fromOffset(55, 55) }, TweenInfo.new(0.1)) end)
+    openButton.MouseLeave:Connect(function() tween(openButton, { Size = UDim2.fromOffset(50, 50) }, TweenInfo.new(0.1)) end)
+
     closeButton.MouseEnter:Connect(function() tween(closeButton, { BackgroundColor3 = Theme.Accent }) end)
     closeButton.MouseLeave:Connect(function() tween(closeButton, { BackgroundColor3 = Theme.Inline }) end)
-    closeButton.MouseButton1Click:Connect(function() self:Destroy() end)
+    
+    -- NÚT X SẼ THU NHỎ HUB
+    closeButton.MouseButton1Click:Connect(function()
+        tween(blur, { Size = 0 }, TweenInfo.new(0.2))
+        tween(overlay, { BackgroundTransparency = 1 }, TweenInfo.new(0.2))
+        tween(root, { Size = startWindowSize }, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+        task.wait(0.2)
+        root.Visible = false
+        openButton.Visible = true -- Hiện Logo lên
+    end)
 
-    -- Animation mở UI mượt mà
+    -- BẤM LOGO ĐỂ PHÓNG TO LẠI HUB
+    openButton.MouseButton1Click:Connect(function()
+        openButton.Visible = false -- Tắt Logo
+        root.Visible = true
+        tween(blur, { Size = 18 }, TweenInfo.new(0.25))
+        tween(overlay, { BackgroundTransparency = 0.4 }, TweenInfo.new(0.2))
+        tween(root, { Size = finalWindowSize }, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
+    end)
+    -- =========================================================================
+
+    -- Animation lúc mới bật script
     tween(blur, { Size = 18 }, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
     tween(overlay, { BackgroundTransparency = 0.4 }, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
     tween(root, { Size = finalWindowSize }, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
-    tween(shadow, { Size = finalShadowSize, ImageTransparency = 0.35 }, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
 
     makeDraggable(topBar, root, self)
     return window
@@ -714,7 +743,7 @@ Runtime.Window = Window
 local HomeTab = Window:CreateTab("🏠 Dashboard")
 HomeTab:CreateParagraph({
     Title = "Saloi Hub",
-    Content = "Da fix loi mat UI. He thong ZIndex moi dam bao Hub hien thi ro net tren moi thiet bi.",
+    Content = "Da fix loi mat UI (Go bo Image Shadow bi loi). Bấm dấu X để thu nhỏ thành 1 ô vuông Logo trên màn hình.",
 })
 
 -- ==========================================
@@ -787,7 +816,7 @@ HomeTab:CreateButton({
 })
 
 HomeTab:CreateButton({
-    Name = "❌ Đóng giao diện",
+    Name = "❌ TẮT HẲN SCRIPT (XÓA)",
     Callback = function()
         Library:Destroy()
     end,
