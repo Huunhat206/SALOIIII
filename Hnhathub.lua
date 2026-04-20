@@ -1551,146 +1551,68 @@ HomeTab:CreateLabel("UI: Custom local library")
 HomeTab:CreateLabel("Theme: Dark glass • orange accent")
 HomeTab:CreateLabel("Files: Autofarm.lua / Event.lua / teleport island.lua")
 
-local readFile = readfile
-local isFile = isfile
+-- ==========================================
+-- HỆ THỐNG TẢI MODULE TỪ GITHUB (ONLINE)
+-- ==========================================
 
-local function compileSource(source, chunkName)
-    if loadstring then
-        local ok, chunk = pcall(loadstring, source, chunkName)
-        if ok and chunk then
-            return chunk
-        end
+local repoUrl = "https://raw.githubusercontent.com/Huunhat206/SALOIIII/main/"
 
-        ok, chunk = pcall(loadstring, source)
-        if ok and chunk then
-            return chunk
-        end
+local function loadModuleFromWeb(fileName, label)
+    -- Mã hóa khoảng trắng trong tên file (ví dụ "teleport island" thành "teleport%20island")
+    local safeFileName = string.gsub(fileName, " ", "%%20")
+    local url = repoUrl .. safeFileName .. "?v=" .. tostring(tick())
+    
+    local success, source = pcall(function()
+        return game:HttpGet(url)
+    end)
+    
+    if not success then
+        local msg = "Khong the tai file tu GitHub."
+        Runtime.ModuleStatus[label] = msg
+        return false, msg
     end
-
-    if load then
-        local ok, chunk = pcall(load, source, chunkName)
-        if ok and chunk then
-            return chunk
-        end
-
-        ok, chunk = pcall(load, source)
-        if ok and chunk then
-            return chunk
-        end
+    
+    local func, compileErr = loadstring(source)
+    if not func then
+        local msg = "Loi Compile: " .. tostring(compileErr)
+        Runtime.ModuleStatus[label] = msg
+        return false, msg
     end
-
-    return nil
-end
-
-local function normalizePath(path)
-    return string.gsub(path, "\\", "/")
-end
-
-local function canReadFile(path)
-    if isFile then
-        local ok, result = pcall(isFile, path)
-        if ok and result then
-            return true
-        end
+    
+    local runSuccess, runErr = pcall(func, Window, Library)
+    if not runSuccess then
+        local msg = "Loi Runtime: " .. tostring(runErr)
+        Runtime.ModuleStatus[label] = msg
+        return false, msg
     end
-
-    if not readFile then
-        return false
-    end
-
-    return pcall(readFile, path)
-end
-
-local function resolveModulePath(fileNames)
-    local prefixes = {
-        "",
-        "./",
-        ".\\",
-        "SALOIIII-main/",
-        "SALOIIII-main\\",
-        "SALOIIII-main/SALOIIII-main/",
-        "SALOIIII-main\\SALOIIII-main\\",
-    }
-
-    for _, fileName in ipairs(fileNames) do
-        for _, prefix in ipairs(prefixes) do
-            local candidate = prefix .. fileName
-            if canReadFile(candidate) then
-                return candidate
-            end
-        end
-    end
-
-    return nil
-end
-
-local function loadModule(moduleInfo)
-    if not readFile then
-        local message = "Executor khong ho tro readfile."
-        Runtime.ModuleStatus[moduleInfo.label] = message
-        return false, message
-    end
-
-    local resolvedPath = resolveModulePath(moduleInfo.paths)
-    if not resolvedPath then
-        local message = "Khong tim thay file module."
-        Runtime.ModuleStatus[moduleInfo.label] = message
-        return false, message
-    end
-
-    local okRead, source = pcall(readFile, resolvedPath)
-    if not okRead then
-        local message = "Khong doc duoc file: " .. tostring(source)
-        Runtime.ModuleStatus[moduleInfo.label] = message
-        return false, message
-    end
-
-    local chunk = compileSource(source, "@" .. normalizePath(resolvedPath))
-    if not chunk then
-        local message = "Khong compile duoc module."
-        Runtime.ModuleStatus[moduleInfo.label] = message
-        return false, message
-    end
-
-    local okRun, runtimeError = pcall(chunk, Window, Library)
-    if not okRun then
-        local message = "Loi runtime: " .. tostring(runtimeError)
-        Runtime.ModuleStatus[moduleInfo.label] = message
-        return false, message
-    end
-
-    Runtime.ModuleStatus[moduleInfo.label] = "Loaded từ " .. normalizePath(resolvedPath)
-    return true, resolvedPath
+    
+    Runtime.ModuleStatus[label] = "Loaded (GitHub)"
+    return true, "Success"
 end
 
 local modules = {
-    {
-        label = "Auto Farm",
-        paths = { "Autofarm.lua" },
-    },
-    {
-        label = "Event",
-        paths = { "Event.lua", "event.lua" },
-    },
-    {
-        label = "Teleport Island",
-        paths = { "teleport island.lua", "Teleport Island.lua" },
-    },
+    { label = "Auto Farm", fileName = "Autofarm.lua" },
+    { label = "Event", fileName = "Event.lua" },
+    { label = "Teleport Island", fileName = "teleport island.lua" },
 }
 
 local loadedCount = 0
-for _, moduleInfo in ipairs(modules) do
-    local ok, message = loadModule(moduleInfo)
+for _, mod in ipairs(modules) do
+    local ok, message = loadModuleFromWeb(mod.fileName, mod.label)
     if ok then
         loadedCount = loadedCount + 1
     else
-        Hub.Helpers.Notify("Module lỗi", moduleInfo.label .. ": " .. tostring(message), 6)
+        Hub.Helpers.Notify("Module Lỗi", mod.label .. ": " .. tostring(message), 6)
     end
 end
 
-HomeTab:CreateSection("Trạng thái module")
-for _, moduleInfo in ipairs(modules) do
-    HomeTab:CreateLabel(moduleInfo.label .. ": " .. (Runtime.ModuleStatus[moduleInfo.label] or "Chua load"))
+-- ==========================================
+-- GIAO DIỆN TRẠNG THÁI
+-- ==========================================
+
+HomeTab:CreateSection("Trạng thái module (GitHub)")
+for _, mod in ipairs(modules) do
+    HomeTab:CreateLabel(mod.label .. ": " .. (Runtime.ModuleStatus[mod.label] or "Chua load"))
 end
 
 HomeTab:CreateSection("Điều khiển")
