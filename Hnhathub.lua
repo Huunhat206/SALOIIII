@@ -62,7 +62,7 @@ local function safeGetUI()
 end
 
 -- ========================================================================
--- 🎨 PREMIUM THEME - Modern Dark with Orange Accent
+-- 🎨 PREMIUM THEME
 -- ========================================================================
 local Theme = {
     Background = Color3.fromRGB(12, 13, 18),
@@ -99,7 +99,7 @@ local Fonts = {
     Body = Enum.Font.Gotham,
     Caption = Enum.Font.Gotham,
     Mono = Enum.Font.Code,
-    Icon = Enum.Font.Code, -- Sửa: Dùng Font.Code để icon không bị vỡ (hình vuông)
+    Icon = Enum.Font.Code,
 }
 
 local Tweens = {
@@ -113,7 +113,6 @@ local Tweens = {
     Spring = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, 0),
 }
 
--- Sửa: Thay thế Emoji bằng Unicode an toàn để tránh lỗi hình vuông
 local Icons = {
     Home = "⌂",
     Dashboard = "◈",
@@ -124,7 +123,7 @@ local Icons = {
     Stop = "⏹",
     Refresh = "↻",
     Close = "✕",
-    Minimize = "─",
+    Minimize = "▼", -- Đã sửa icon
     Maximize = "□",
     Check = "✓",
     Cross = "✕",
@@ -135,7 +134,7 @@ local Icons = {
     ArrowRight = "→",
     Target = "◎",
     Zap = "⚡",
-    Fire = "!", -- Emoji 🔥 không hỗ trợ tốt trên PC, thay bằng ký tự an toàn hoặc giữ nguyên nếu mobile
+    Fire = "!",
     Star = "★",
     Heart = "♥",
     Shield = "⛨",
@@ -155,12 +154,12 @@ local Icons = {
     More = "⋯",
     Eye = "👁",
     Lock = "🔒",
-    Farm = "≡", -- Thay 🌾
-    Event = "★", -- Thay 🎉
-    Teleport = "»", -- Thay ⚡ (duplicate nhưng dùng mũi tên)
-    Player = "●", -- Thay 👤
-    World = "◐", -- Thay 🌍
-    Combat = "×", -- Thay ⚔
+    Farm = "≡",
+    Event = "★",
+    Teleport = "»",
+    Player = "●",
+    World = "◐",
+    Combat = "×",
 }
 
 -- ========================================================================
@@ -303,16 +302,12 @@ local function makeDraggable(handle, target, library)
     end)
 end
 
--- 🎨 Premium panel builder (ĐÃ SỬA LỖI CORNERRADIUS)
 local function makePanel(parent, properties)
     local props = {}
     for k, v in pairs(properties or {}) do props[k] = v end
     props.Parent = parent 
-    
-    -- FIX: Lấy CornerRadius ra và xóa khỏi props để không gán vào Frame
     local radius = props.CornerRadius
     props.CornerRadius = nil
-    
     local panel = create("Frame", props)
     addCorner(panel, radius or 14)
     addStroke(panel, Theme.Border, 1, 0.3)
@@ -511,7 +506,7 @@ function Library:CreateWindow(options)
 
     self.Window = window
 
-    -- 🎯 FLOATING LOGO BUTTON
+    -- FLOATING LOGO
     local openButton = create("TextButton", { Parent = rootGui, Name = "OpenLogoButton", Size = UDim2.fromOffset(55, 55), Position = UDim2.new(0, 25, 0, 25), BackgroundColor3 = Theme.Surface, AutoButtonColor = false, Visible = false, Text = "", ZIndex = 9999 })
     addCorner(openButton, 16); addStroke(openButton, Theme.Accent, 2, 0); addShadow(openButton, 0.5, 40, Vector2.new(0, 8))
     addGradient(openButton, ColorSequence.new({ ColorSequenceKeypoint.new(0, Theme.Surface), ColorSequenceKeypoint.new(1, Theme.Panel) }), 135)
@@ -519,7 +514,6 @@ function Library:CreateWindow(options)
     local logoGlow = addGlow(openButton, Theme.Accent, 0.6, 25)
     local logoImage = create("ImageLabel", { Parent = openButton, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = "", ZIndex = 10000 })
     addCorner(logoImage, 16)
-    
     local fallbackLogo = create("TextLabel", { Parent = openButton, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "S", TextColor3 = Theme.Accent, TextSize = 26, Font = Fonts.Display, ZIndex = 10000 })
     
     task.spawn(function()
@@ -536,17 +530,6 @@ function Library:CreateWindow(options)
     
     openButton.MouseEnter:Connect(function() tween(openButton, { Size = UDim2.fromOffset(62, 62) }, Tweens.Bounce); tween(logoGlow, { ImageTransparency = 0.2, Size = UDim2.new(1, 40, 1, 40) }, Tweens.Smooth) end)
     openButton.MouseLeave:Connect(function() tween(openButton, { Size = UDim2.fromOffset(55, 55) }, Tweens.Bounce); tween(logoGlow, { ImageTransparency = 0.6, Size = UDim2.new(1, 25, 1, 25) }, Tweens.Smooth) end)
-    
-    task.spawn(function()
-        while openButton.Parent do
-            if openButton.Visible then
-                tween(logoGlow, { ImageTransparency = 0.4 }, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut))
-                task.wait(1.2)
-                tween(logoGlow, { ImageTransparency = 0.8 }, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut))
-                task.wait(1.2)
-            else task.wait(0.5) end
-        end
-    end)
     
     closeButton.MouseButton1Click:Connect(function()
         createRipple(closeButton, UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y, Theme.Error)
@@ -589,15 +572,22 @@ function Library:CreateWindow(options)
     return window
 end
 
+-- SỬA LỖI ĐỔI TAB (KHÔNG CHỒNG LÊN NHAU)
 function WindowClass:SelectTab(targetTab)
     for _, tab in ipairs(self.Tabs) do
         local isActive = tab == targetTab
+        
+        -- Logic hiển thị: Tab cũ tắt ngay, Tab mới bật và animate
         if isActive then
             tab.Page.Visible = true
-            tab.Page.Position = UDim2.new(0.03, 0, 0, 0)
-            for _, child in ipairs(tab.Page:GetChildren()) do if child:IsA("Frame") or child:IsA("TextLabel") then child.Position = child.Position + UDim2.new(0.01, 0, 0, 0) end end
+            tab.Page.Position = UDim2.new(0.03, 0, 0, 0) -- Start slightly offset
             tween(tab.Page, { Position = UDim2.new(0, 0, 0, 0) }, Tweens.Smooth)
-        else task.delay(0.15, function() if self.ActiveTab ~= tab then tab.Page.Visible = false end end) end
+        else
+            -- Tắt ngay lập tức thay vì delay
+            tab.Page.Visible = false
+        end
+        
+        -- Logic nút bấm
         tween(tab.Button, { BackgroundColor3 = isActive and Theme.Accent or Theme.Surface, BackgroundTransparency = isActive and 0 or 0.3 }, Tweens.Smooth)
         tween(tab.ButtonStroke, { Transparency = isActive and 0 or 0.4, Color = isActive and Theme.AccentSoft or Theme.Border }, Tweens.Smooth)
         tween(tab.ButtonLabel, { TextColor3 = isActive and Theme.Background or Theme.TextSecondary }, Tweens.Smooth)
@@ -607,6 +597,7 @@ function WindowClass:SelectTab(targetTab)
     self.ActiveTab = targetTab
     self.HeaderTitle.Text = targetTab.Title
     self.HeaderSubtitle.Text = string.format("%s > %s", self.WindowName, targetTab.Title)
+    
     tween(self.BreadcrumbIcon, { Rotation = 180 }, Tweens.Smooth)
     task.delay(0.35, function() self.BreadcrumbIcon.Rotation = 0 end)
 end
@@ -749,15 +740,43 @@ function TabClass:CreateInput(data)
     return { Input = textBox }
 end
 
+-- DROPDOWN ĐÃ SỬA (HỖ TRỢ MULTI-SELECT)
 function TabClass:CreateDropdown(data)
     local options = copyArray(data.Options)
     if #options == 0 then options[1] = "None" end
-    local selected = getDropdownValue(data.CurrentOption) or options[1]
-    if not contains(options, selected) then selected = options[1] end
-    if data.Flag then self.Window.Library.Flags[data.Flag] = selected end
+    
+    local isMultiple = data.MultipleOptions or false
+    local selectedList = {}
+    
+    local function initSelection()
+        if isMultiple then
+            selectedList = {}
+            if type(data.CurrentOption) == "table" then
+                for _, v in ipairs(data.CurrentOption) do
+                    if contains(options, v) then table.insert(selectedList, v) end
+                end
+            end
+        else
+            local current = getDropdownValue(data.CurrentOption) or options[1]
+            if contains(options, current) then selectedList[1] = current else selectedList[1] = options[1] end
+        end
+        if data.Flag then self.Window.Library.Flags[data.Flag] = selectedList end
+    end
+    initSelection()
 
-    local card = createCard(self.Page); card.ZIndex = 14
-    addPadding(card, 14, 14, 12, 12); addList(card, 10)
+    local function getText()
+        if isMultiple then
+            if #selectedList == 0 then return "None" end
+            return string.format("Selected (%d)", #selectedList)
+        else
+            return tostring(selectedList[1])
+        end
+    end
+
+    local card = createCard(self.Page)
+    card.ZIndex = 14
+    addPadding(card, 14, 14, 12, 12)
+    addList(card, 10)
     
     local titleRow = create("Frame", { Parent = card, Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, ZIndex = 15 })
     create("TextLabel", { Parent = titleRow, BackgroundTransparency = 1, Size = UDim2.fromOffset(18, 18), Position = UDim2.new(0, 0, 0, 0), Text = data.Icon or Icons.Menu, TextColor3 = Theme.Accent, TextSize = 14, Font = Fonts.Icon, ZIndex = 15 })
@@ -766,7 +785,7 @@ function TabClass:CreateDropdown(data)
     local selector = create("TextButton", { Parent = card, Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = Theme.Inline, BackgroundTransparency = 0.2, BorderSizePixel = 0, AutoButtonColor = false, Text = "", ZIndex = 15 })
     addCorner(selector, 10)
     local selectorStroke = addStroke(selector, Theme.Border, 1, 0.4)
-    local selectorText = create("TextLabel", { Parent = selector, BackgroundTransparency = 1, Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -36, 1, 0), Text = tostring(selected), TextColor3 = Theme.Text, TextSize = 12, Font = Fonts.Body, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 16 })
+    local selectorText = create("TextLabel", { Parent = selector, BackgroundTransparency = 1, Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -36, 1, 0), Text = getText(), TextColor3 = Theme.Text, TextSize = 12, Font = Fonts.Body, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 16 })
     local arrow = create("TextLabel", { Parent = selector, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(16, 16), BackgroundTransparency = 1, Text = Icons.ArrowDown, TextColor3 = Theme.Accent, TextSize = 14, Font = Fonts.Header, ZIndex = 16 })
 
     local optionsHolder = create("Frame", { Parent = card, Visible = false, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 15 })
@@ -780,20 +799,37 @@ function TabClass:CreateDropdown(data)
         for _, button in ipairs(optionButtons) do pcall(function() button:Destroy() end) end
         optionButtons = {}
         for _, optionValue in ipairs(options) do
-            local isSelected = optionValue == selected
+            local isSelected = contains(selectedList, optionValue)
             local optionButton = create("TextButton", { Parent = optionsHolder, Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = isSelected and Theme.Accent or Theme.Surface, BackgroundTransparency = isSelected and 0 or 0.3, BorderSizePixel = 0, AutoButtonColor = false, Text = "", ZIndex = 16 })
             addCorner(optionButton, 8); addStroke(optionButton, isSelected and Theme.AccentSoft or Theme.Border, 1, isSelected and 0 or 0.5)
             local checkIcon = create("TextLabel", { Parent = optionButton, BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 0), Size = UDim2.fromOffset(14, 32), Text = isSelected and Icons.Check or " ", TextColor3 = isSelected and Theme.Background or Theme.Muted, TextSize = isSelected and 12 or 16, Font = Fonts.Icon, ZIndex = 17 })
             local optionLabel = create("TextLabel", { Parent = optionButton, BackgroundTransparency = 1, Position = UDim2.new(0, 30, 0, 0), Size = UDim2.new(1, -40, 1, 0), Text = tostring(optionValue), TextColor3 = isSelected and Theme.Background or Theme.TextSecondary, TextSize = 12, Font = Fonts.Body, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 17 })
+            
             optionButton.MouseEnter:Connect(function() if not isSelected then tween(optionButton, { BackgroundColor3 = Theme.Inline, BackgroundTransparency = 0 }, Tweens.Fast) end end)
             optionButton.MouseLeave:Connect(function() if not isSelected then tween(optionButton, { BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0.3 }, Tweens.Fast) end end)
+            
             optionButton.MouseButton1Click:Connect(function()
-                selected = optionValue; selectorText.Text = tostring(selected)
-                if data.Flag then self.Window.Library.Flags[data.Flag] = selected end
-                isOpen = false; tween(arrow, { Rotation = 0 }, Tweens.Smooth)
-                task.delay(0.15, function() optionsHolder.Visible = false end)
-                rebuildButtons()
-                if data.Callback then task.spawn(function() pcall(data.Callback, { selected }) end) end
+                if isMultiple then
+                    -- Multi-Select Logic
+                    if contains(selectedList, optionValue) then
+                        for i, v in ipairs(selectedList) do if v == optionValue then table.remove(selectedList, i); break end end
+                    else
+                        table.insert(selectedList, optionValue)
+                    end
+                    selectorText.Text = getText()
+                    if data.Flag then self.Window.Library.Flags[data.Flag] = selectedList end
+                    rebuildButtons()
+                    if data.Callback then task.spawn(function() pcall(data.Callback, selectedList) end) end
+                else
+                    -- Single-Select Logic
+                    selectedList[1] = optionValue
+                    selectorText.Text = getText()
+                    if data.Flag then self.Window.Library.Flags[data.Flag] = selectedList end
+                    isOpen = false; tween(arrow, { Rotation = 0 }, Tweens.Smooth)
+                    task.delay(0.15, function() optionsHolder.Visible = false end)
+                    rebuildButtons()
+                    if data.Callback then task.spawn(function() pcall(data.Callback, selectedList) end) end
+                end
             end)
             table.insert(optionButtons, optionButton)
         end
@@ -802,9 +838,8 @@ function TabClass:CreateDropdown(data)
     local function refresh(newOptions, keepSelection)
         options = copyArray(newOptions)
         if #options == 0 then options[1] = "None" end
-        if not keepSelection or not contains(options, selected) then selected = options[1] end
-        selectorText.Text = tostring(selected)
-        if data.Flag then self.Window.Library.Flags[data.Flag] = selected end
+        if not keepSelection then initSelection() end
+        selectorText.Text = getText()
         rebuildButtons()
     end
 
@@ -819,7 +854,11 @@ function TabClass:CreateDropdown(data)
 
     rebuildButtons()
     function controller:Refresh(newOptions, keepSelection) refresh(newOptions, keepSelection) end
-    function controller:Set(newValue) if contains(options, newValue) then selected = newValue; selectorText.Text = tostring(selected); rebuildButtons() end end
+    function controller:Set(newValue)
+        if isMultiple then selectedList = copyArray(newValue) else selectedList[1] = newValue end
+        selectorText.Text = getText()
+        rebuildButtons()
+    end
     return controller
 end
 
@@ -916,7 +955,7 @@ local Window = Library:CreateWindow({ Name = "Saloi Hub", Subtitle = "Premium Ed
 Runtime.Window = Window
 
 local HomeTab = Window:CreateTab("Dashboard", Icons.Dashboard)
-HomeTab:CreateParagraph({ Title = "Welcome to Saloi Hub Premium", Content = "UI fixed: CornerRadius error fixed. Icons updated for better compatibility." })
+HomeTab:CreateParagraph({ Title = "Welcome to Saloi Hub Premium", Content = "UI fixed: CornerRadius error fixed. Icons updated for better compatibility. Tab switching fixed." })
 
 local modules = {
     { label = "Auto Farm", fileName = "Autofarm.lua", icon = Icons.Farm },
