@@ -14,13 +14,13 @@ local CFG = {
     AutoSell       = false,
     SellInterval   = 3.0,
     IdleClickDelay = 2.0,
-    EarlyHit       = 2.0,
+    HitDelay       = 0.15, -- delay trước khi fire sau khi snap rotation
     Debug          = true,
 }
 
-local ByteNetQuery       = ReplicatedStorage:WaitForChild("ByteNetQuery", 10)
-local ByteNetUnreliable  = ReplicatedStorage:WaitForChild("ByteNetUnreliable", 10)
-local ByteNetReliable    = ReplicatedStorage:WaitForChild("ByteNetReliable", 10)
+local ByteNetQuery      = ReplicatedStorage:WaitForChild("ByteNetQuery", 10)
+local ByteNetUnreliable = ReplicatedStorage:WaitForChild("ByteNetUnreliable", 10)
+local ByteNetReliable   = ReplicatedStorage:WaitForChild("ByteNetReliable", 10)
 
 local SELL_BUF = buffer.fromstring("2")
 
@@ -38,7 +38,6 @@ local function tryOpenFishing()
         local char = player.Character
         local tool = char and char:FindFirstChildOfClass("Tool")
         if tool then tool:Activate() end
-        
         VirtualUser:CaptureController()
         VirtualUser:Button1Down(Vector2.new(0, 0), camera.CFrame)
         task.wait(0.1)
@@ -46,14 +45,14 @@ local function tryOpenFishing()
     end)
 end
 
-local qteClickFunc = nil 
+local qteClickFunc  = nil
+local lastHitBuffer = nil
 
 local function findQTEClickFunction()
     local qte = PlayerGui:FindFirstChild("QTE")
     if not qte then return nil end
     local main = qte:FindFirstChild("Main")
     if not main then return nil end
-
     for _, child in ipairs(main:GetDescendants()) do
         if child:IsA("TextButton") or child:IsA("ImageButton") then
             return child
@@ -61,8 +60,6 @@ local function findQTEClickFunction()
     end
     return nil
 end
-
-local lastHitBuffer = nil
 
 local function fireQTEHit()
     if lastHitBuffer and ByteNetUnreliable then
@@ -72,36 +69,37 @@ local function fireQTEHit()
     end
 
     if not qteClickFunc then qteClickFunc = findQTEClickFunction() end
-    if qteClickFunc then
+    if qteClickFunc and getconnections then
         local fired = false
-        if getconnections then
-            pcall(function()
-                for _, conn in pairs(getconnections(qteClickFunc.MouseButton1Click)) do conn:Fire(); fired = true end
-                for _, conn in pairs(getconnections(qteClickFunc.Activated)) do conn:Fire(); fired = true end
-            end)
-        end
-        
+        pcall(function()
+            for _, conn in pairs(getconnections(qteClickFunc.MouseButton1Click)) do conn:Fire(); fired = true end
+            for _, conn in pairs(getconnections(qteClickFunc.Activated))        do conn:Fire(); fired = true end
+        end)
         if fired then return end
     end
 
-    local center = qteClickFunc and (qteClickFunc.AbsolutePosition + qteClickFunc.AbsoluteSize / 2) or Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+    local center = qteClickFunc
+        and (qteClickFunc.AbsolutePosition + qteClickFunc.AbsoluteSize / 2)
+        or  Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
     pcall(function()
-        VIM:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+        VIM:SendMouseButtonEvent(center.X, center.Y, 0, true,  game, 0)
         task.wait(0.02)
         VIM:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
     end)
 end
 
+-- Hook capture buffer
 if hookfunction and ByteNetUnreliable then
     local origFire
     origFire = hookfunction(ByteNetUnreliable.FireServer, newcclosure(function(self, ...)
         if self == ByteNetUnreliable then
             local args = {...}
             if args[1] and typeof(args[1]) == "buffer" then
-                local qte = PlayerGui:FindFirstChild("QTE")
+                local qte  = PlayerGui:FindFirstChild("QTE")
                 local main = qte and qte:FindFirstChild("Main")
                 if main and main.Visible then
                     lastHitBuffer = args[1]
+                    if CFG.Debug then print("[v5] Buffer captured!") end
                 end
             end
         end
@@ -109,15 +107,11 @@ if hookfunction and ByteNetUnreliable then
     end))
 end
 
-local function normAngle(a) return a % 360 end
-local function angleDiff(a, b)
-    local d = math.abs(normAngle(a) - normAngle(b))
-    return d > 180 and 360 - d or d
-end
-
+-- ══════════ REFS ══════════
 local QTE, MainFrame, LineObj, BarsFolder
+
 local function initRefs()
-    QTE = PlayerGui:FindFirstChild("QTE")
+    QTE        = PlayerGui:FindFirstChild("QTE")
     if not QTE then return false end
     MainFrame  = QTE:FindFirstChild("Main")
     if not MainFrame then return false end
@@ -126,11 +120,13 @@ local function initRefs()
     return LineObj ~= nil and BarsFolder ~= nil
 end
 
-local lastIdleOpen  = 0
-local lastHitFire   = 0
+-- ══════════ MAIN LOOP - INSTANT ══════════
+local lastIdleOpen = 0
+local isFiring     = false
 
 RunService.Heartbeat:Connect(function()
-    if not CFG.Enabled then return end
+    if not CFG.Enabled or isFiring then return end
+
     local now = tick()
 
     local qteActive = false
@@ -146,70 +142,200 @@ RunService.Heartbeat:Connect(function()
             tryOpenFishing()
             lastIdleOpen = now
         end
-        return 
+        return
     end
 
-    if not LineObj or not LineObj.Parent or not BarsFolder or not BarsFolder.Parent then initRefs() end
+    -- Đảm bảo refs valid
+    if not LineObj or not LineObj.Parent or not BarsFolder or not BarsFolder.Parent then
+        initRefs()
+    end
     if not LineObj or not BarsFolder then return end
 
-    local lineRot = 0
-    if not pcall(function() lineRot = LineObj.Rotation end) then return end
-    lineRot = normAngle(lineRot + CFG.EarlyHit)
-
-    local bars = BarsFolder:GetChildren()
-    for i = 1, #bars do
-        local bar = bars[i]
+    -- Tìm Bar visible
+    local targetBar = nil
+    for _, bar in ipairs(BarsFolder:GetChildren()) do
         if bar:IsA("ImageLabel") or bar:IsA("Frame") then
-            local visible = false
-            pcall(function() visible = bar.Visible end)
-            if visible then
-                local barRot = 0
-                pcall(function() barRot = bar.Rotation end)
+            local vis = false
+            pcall(function() vis = bar.Visible end)
+            if vis then targetBar = bar; break end
+        end
+    end
+    if not targetBar then return end
 
-                local arcDeg = 15
-                local n = bar.Name:match("_(%d+)$")
-                if n then arcDeg = tonumber(n) or 15 end
+    -- INSTANT: snap Line thẳng vào Bar rồi fire
+    isFiring = true
+    task.spawn(function()
+        local barRot = 0
+        pcall(function() barRot = targetBar.Rotation end)
 
-                if angleDiff(lineRot, normAngle(barRot)) <= arcDeg / 2 then
-                    if now - lastHitFire >= 0.05 then
-                        fireQTEHit()
-                        lastHitFire = now
-                    end
-                end
-            end
+        if CFG.Debug then
+            print(string.format("[v5 INSTANT] Snap Line %.1f → %.1f",
+                LineObj.Rotation, barRot))
+        end
+
+        pcall(function() LineObj.Rotation = barRot end)
+
+        task.wait(CFG.HitDelay)
+        fireQTEHit()
+
+        -- Đợi QTE đóng
+        local timeout = tick() + 4
+        repeat task.wait(0.1) until
+            not MainFrame.Visible or tick() > timeout
+
+        isFiring = false
+    end)
+end)
+
+-- ══════════ GUI ══════════
+pcall(function()
+    if PlayerGui:FindFirstChild("_MacroGUI") then
+        PlayerGui:FindFirstChild("_MacroGUI"):Destroy()
+    end
+end)
+
+local sg = Instance.new("ScreenGui")
+sg.Name = "_MacroGUI"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true; sg.Parent = PlayerGui
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, 200, 0, 195)
+panel.Position = UDim2.new(0, 12, 0.5, -97)
+panel.BackgroundColor3 = Color3.fromRGB(14,14,18)
+panel.BorderSizePixel = 0; panel.Parent = sg
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
+
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1,0,0,26)
+topBar.BackgroundColor3 = Color3.fromRGB(26,26,34)
+topBar.BorderSizePixel = 0; topBar.Parent = panel
+Instance.new("UICorner", topBar).CornerRadius = UDim.new(0,10)
+
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1,-10,1,0); titleLbl.Position = UDim2.new(0,10,0,0)
+titleLbl.BackgroundTransparency = 1; titleLbl.Text = "🎣 Fish & Sell v5  [INSTANT]"
+titleLbl.Font = Enum.Font.GothamBold; titleLbl.TextSize = 11
+titleLbl.TextColor3 = Color3.fromRGB(200,200,225)
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left; titleLbl.Parent = topBar
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(1,-16,0,32); toggleBtn.Position = UDim2.new(0,8,0,30)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(35,175,95); toggleBtn.BorderSizePixel = 0
+toggleBtn.Font = Enum.Font.GothamBold; toggleBtn.TextSize = 13
+toggleBtn.TextColor3 = Color3.new(1,1,1); toggleBtn.Text = "AUTO FISH: ON"
+toggleBtn.Parent = panel; Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,7)
+
+local sellBtn = Instance.new("TextButton")
+sellBtn.Size = UDim2.new(1,-16,0,30); sellBtn.Position = UDim2.new(0,8,0,67)
+sellBtn.BackgroundColor3 = Color3.fromRGB(175,45,45); sellBtn.BorderSizePixel = 0
+sellBtn.Font = Enum.Font.GothamBold; sellBtn.TextSize = 12
+sellBtn.TextColor3 = Color3.new(1,1,1); sellBtn.Text = "AUTO SELL: OFF"
+sellBtn.Parent = panel; Instance.new("UICorner", sellBtn).CornerRadius = UDim.new(0,7)
+
+local bufLbl = Instance.new("TextLabel")
+bufLbl.Size = UDim2.new(1,-16,0,14); bufLbl.Position = UDim2.new(0,8,0,102)
+bufLbl.BackgroundTransparency = 1; bufLbl.Font = Enum.Font.Gotham; bufLbl.TextSize = 10
+bufLbl.TextColor3 = Color3.fromRGB(200,140,50); bufLbl.Text = "Click 1 lần để capture buffer"
+bufLbl.TextXAlignment = Enum.TextXAlignment.Left; bufLbl.Parent = panel
+
+local statusLbl = Instance.new("TextLabel")
+statusLbl.Size = UDim2.new(1,-16,0,14); statusLbl.Position = UDim2.new(0,8,0,117)
+statusLbl.BackgroundTransparency = 1; statusLbl.Font = Enum.Font.Gotham; statusLbl.TextSize = 10
+statusLbl.TextColor3 = Color3.fromRGB(100,100,130); statusLbl.Text = "○ Đợi câu..."
+statusLbl.TextXAlignment = Enum.TextXAlignment.Left; statusLbl.Parent = panel
+
+-- Delay label + buttons
+local delayLbl = Instance.new("TextLabel")
+delayLbl.Size = UDim2.new(1,-16,0,14); delayLbl.Position = UDim2.new(0,8,0,133)
+delayLbl.BackgroundTransparency = 1; delayLbl.Font = Enum.Font.Gotham; delayLbl.TextSize = 10
+delayLbl.TextColor3 = Color3.fromRGB(120,120,150)
+delayLbl.TextXAlignment = Enum.TextXAlignment.Left; delayLbl.Parent = panel
+
+local function updateDelayLbl()
+    delayLbl.Text = string.format("Fire delay: %.2fs  (miss → tăng)", CFG.HitDelay)
+end
+updateDelayLbl()
+
+local btnRow = Instance.new("Frame")
+btnRow.Size = UDim2.new(1,-16,0,24); btnRow.Position = UDim2.new(0,8,0,149)
+btnRow.BackgroundTransparency = 1; btnRow.Parent = panel
+
+local function makeBtn(text, xoff)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,82,1,0); b.Position = UDim2.new(0,xoff,0,0)
+    b.BackgroundColor3 = Color3.fromRGB(50,50,70); b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold; b.TextSize = 11
+    b.TextColor3 = Color3.new(1,1,1); b.Text = text
+    b.Parent = btnRow; Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+    return b
+end
+
+local btnM = makeBtn("− 0.05s", 0)
+local btnP = makeBtn("+ 0.05s", 88)
+btnM.MouseButton1Click:Connect(function()
+    CFG.HitDelay = math.max(0, CFG.HitDelay - 0.05); updateDelayLbl()
+end)
+btnP.MouseButton1Click:Connect(function()
+    CFG.HitDelay = math.min(2, CFG.HitDelay + 0.05); updateDelayLbl()
+end)
+
+-- Status update
+RunService.Heartbeat:Connect(function()
+    if lastHitBuffer then
+        bufLbl.Text = "✓ Buffer captured - fully auto!"
+        bufLbl.TextColor3 = Color3.fromRGB(80,200,120)
+    end
+    if MainFrame then
+        local active = false
+        pcall(function() active = MainFrame.Visible end)
+        if isFiring then
+            statusLbl.Text = "⚡ INSTANT FIRING..."
+            statusLbl.TextColor3 = Color3.fromRGB(255,200,50)
+        elseif active then
+            statusLbl.Text = "● QTE đang chạy"
+            statusLbl.TextColor3 = Color3.fromRGB(80,200,120)
+        else
+            statusLbl.Text = "○ Đợi câu..."
+            statusLbl.TextColor3 = Color3.fromRGB(100,100,130)
         end
     end
 end)
 
-pcall(function() if PlayerGui:FindFirstChild("_MacroGUI") then PlayerGui:FindFirstChild("_MacroGUI"):Destroy() end end)
-local sg = Instance.new("ScreenGui"); sg.Name = "_MacroGUI"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true; sg.Parent = PlayerGui
-local panel = Instance.new("Frame"); panel.Size = UDim2.new(0, 200, 0, 175); panel.Position = UDim2.new(0, 12, 0.5, -87); panel.BackgroundColor3 = Color3.fromRGB(14,14,18); panel.BorderSizePixel = 0; panel.Parent = sg; Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
-local topBar = Instance.new("Frame"); topBar.Size = UDim2.new(1,0,0,26); topBar.BackgroundColor3 = Color3.fromRGB(26,26,34); topBar.BorderSizePixel = 0; topBar.Parent = panel; Instance.new("UICorner", topBar).CornerRadius = UDim.new(0,10)
-local titleLbl = Instance.new("TextLabel"); titleLbl.Size = UDim2.new(1,-10,1,0); titleLbl.Position = UDim2.new(0,10,0,0); titleLbl.BackgroundTransparency = 1; titleLbl.Text = "🎣 Fish & Sell v4.4 Mobile"; titleLbl.Font = Enum.Font.GothamBold; titleLbl.TextSize = 11; titleLbl.TextColor3 = Color3.fromRGB(200,200,225); titleLbl.TextXAlignment = Enum.TextXAlignment.Left; titleLbl.Parent = topBar
-local toggleBtn = Instance.new("TextButton"); toggleBtn.Size = UDim2.new(1,-16,0,32); toggleBtn.Position = UDim2.new(0,8,0,30); toggleBtn.BackgroundColor3 = Color3.fromRGB(35,175,95); toggleBtn.BorderSizePixel = 0; toggleBtn.Font = Enum.Font.GothamBold; toggleBtn.TextSize = 13; toggleBtn.TextColor3 = Color3.new(1,1,1); toggleBtn.Text = "AUTO FISH: ON"; toggleBtn.Parent = panel; Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,7)
-local sellBtn = Instance.new("TextButton"); sellBtn.Size = UDim2.new(1,-16,0,30); sellBtn.Position = UDim2.new(0,8,0,67); sellBtn.BackgroundColor3 = Color3.fromRGB(175,45,45); sellBtn.BorderSizePixel = 0; sellBtn.Font = Enum.Font.GothamBold; sellBtn.TextSize = 12; sellBtn.TextColor3 = Color3.new(1,1,1); sellBtn.Text = "AUTO SELL: OFF"; sellBtn.Parent = panel; Instance.new("UICorner", sellBtn).CornerRadius = UDim.new(0,7)
-local bufLbl = Instance.new("TextLabel"); bufLbl.Size = UDim2.new(1,-16,0,14); bufLbl.Position = UDim2.new(0,8,0,102); bufLbl.BackgroundTransparency = 1; bufLbl.Font = Enum.Font.Gotham; bufLbl.TextSize = 10; bufLbl.TextColor3 = Color3.fromRGB(200,140,50); bufLbl.Text = "Click 1 lần để capture buffer"; bufLbl.TextXAlignment = Enum.TextXAlignment.Left; bufLbl.Parent = panel
-local statusLbl = Instance.new("TextLabel"); statusLbl.Size = UDim2.new(1,-16,0,14); statusLbl.Position = UDim2.new(0,8,0,117); statusLbl.BackgroundTransparency = 1; statusLbl.Font = Enum.Font.Gotham; statusLbl.TextSize = 10; statusLbl.TextColor3 = Color3.fromRGB(100,100,130); statusLbl.Text = "○ Đợi câu..."; statusLbl.TextXAlignment = Enum.TextXAlignment.Left; statusLbl.Parent = panel
-local earlyLbl = Instance.new("TextLabel"); earlyLbl.Size = UDim2.new(1,-16,0,14); earlyLbl.Position = UDim2.new(0,8,0,131); earlyLbl.BackgroundTransparency = 1; earlyLbl.Font = Enum.Font.Gotham; earlyLbl.TextSize = 10; earlyLbl.TextColor3 = Color3.fromRGB(120,120,150); earlyLbl.Text = string.format("Bù sớm: %.0f°", CFG.EarlyHit); earlyLbl.TextXAlignment = Enum.TextXAlignment.Left; earlyLbl.Parent = panel
-local btnRow = Instance.new("Frame"); btnRow.Size = UDim2.new(1,-16,0,24); btnRow.Position = UDim2.new(0,8,0,146); btnRow.BackgroundTransparency = 1; btnRow.Parent = panel
-local function makeBtn(text, xoff) local b = Instance.new("TextButton"); b.Size = UDim2.new(0,54,1,0); b.Position = UDim2.new(0,xoff,0,0); b.BackgroundColor3 = Color3.fromRGB(50,50,70); b.BorderSizePixel = 0; b.Font = Enum.Font.GothamBold; b.TextSize = 12; b.TextColor3 = Color3.new(1,1,1); b.Text = text; b.Parent = btnRow; Instance.new("UICorner", b).CornerRadius = UDim.new(0,6); return b end
-local btnM = makeBtn("− 1°", 0); local btnP = makeBtn("+ 1°", 60)
-btnM.MouseButton1Click:Connect(function() CFG.EarlyHit = math.max(-15, CFG.EarlyHit - 1); earlyLbl.Text = string.format("Bù sớm: %.0f°", CFG.EarlyHit) end)
-btnP.MouseButton1Click:Connect(function() CFG.EarlyHit = math.min(30, CFG.EarlyHit + 1); earlyLbl.Text = string.format("Bù sớm: %.0f°", CFG.EarlyHit) end)
-RunService.Heartbeat:Connect(function()
-    if lastHitBuffer then bufLbl.Text = "✓ Buffer captured!"; bufLbl.TextColor3 = Color3.fromRGB(80,200,120) end
-    if MainFrame then
-        local active = false; pcall(function() active = MainFrame.Visible end)
-        statusLbl.Text = active and "● QTE đang chạy" or "○ Đợi câu..."
-        statusLbl.TextColor3 = active and Color3.fromRGB(80,200,120) or Color3.fromRGB(100,100,130)
-    end
-end)
-local function setFishing(s) CFG.Enabled = s; toggleBtn.BackgroundColor3 = s and Color3.fromRGB(35,175,95) or Color3.fromRGB(175,45,45); toggleBtn.Text = s and "AUTO FISH: ON" or "AUTO FISH: OFF" end
-local function setSelling(s) CFG.AutoSell = s; sellBtn.BackgroundColor3 = s and Color3.fromRGB(35,175,95) or Color3.fromRGB(175,45,45); sellBtn.Text = s and "AUTO SELL: ON" or "AUTO SELL: OFF" end
+local function setFishing(s)
+    CFG.Enabled = s
+    toggleBtn.BackgroundColor3 = s and Color3.fromRGB(35,175,95) or Color3.fromRGB(175,45,45)
+    toggleBtn.Text = s and "AUTO FISH: ON" or "AUTO FISH: OFF"
+end
+local function setSelling(s)
+    CFG.AutoSell = s
+    sellBtn.BackgroundColor3 = s and Color3.fromRGB(35,175,95) or Color3.fromRGB(175,45,45)
+    sellBtn.Text = s and "AUTO SELL: ON" or "AUTO SELL: OFF"
+end
+
 toggleBtn.MouseButton1Click:Connect(function() setFishing(not CFG.Enabled) end)
 sellBtn.MouseButton1Click:Connect(function() setSelling(not CFG.AutoSell) end)
-local drag, dStart, dPos = false, nil, nil
-topBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then drag=true; dStart=i.Position; dPos=panel.Position end end)
-topBar.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then drag=false end end)
-UserInputService.InputChanged:Connect(function(i) if drag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then local d = i.Position - dStart; panel.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset+d.X, dPos.Y.Scale, dPos.Y.Offset+d.Y) end end)
 
+-- Drag (hỗ trợ cả touch)
+local drag, dStart, dPos = false, nil, nil
+topBar.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
+        drag=true; dStart=i.Position; dPos=panel.Position
+    end
+end)
+topBar.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1
+    or i.UserInputType == Enum.UserInputType.Touch then
+        drag=false
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if drag and (i.UserInputType == Enum.UserInputType.MouseMovement
+              or i.UserInputType == Enum.UserInputType.Touch) then
+        local d = i.Position - dStart
+        panel.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset+d.X,
+                                   dPos.Y.Scale, dPos.Y.Offset+d.Y)
+    end
+end)
+
+print("[Fish & Sell v5 INSTANT] Loaded ✓")
+print(">> Click thủ công 1 lần vào QTE để capture buffer!")
