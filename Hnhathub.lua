@@ -10,12 +10,13 @@ local PlayerGui = player.PlayerGui
 local camera    = workspace.CurrentCamera
 
 local CFG = {
-    Enabled        = true,
-    AutoSell       = false,
-    SellInterval   = 3.0,
-    IdleClickDelay = 2.0,
-    PingDelay      = 0.05,
-    Debug          = true,
+    Enabled           = true,
+    AutoSell          = false,
+    SellInterval      = 3.0,
+    IdleClickDelay    = 2.0,
+    PingDelay         = 0.05, 
+    PerfectStrictness = 0.35, -- Đã nới nhẹ ra 35% để chống trượt do giật lag
+    Debug             = true,
 }
 
 local ByteNetQuery       = ReplicatedStorage:WaitForChild("ByteNetQuery", 10)
@@ -54,9 +55,7 @@ local function findQTEClickFunction()
     if not main then return nil end
 
     for _, child in ipairs(main:GetDescendants()) do
-        if child:IsA("TextButton") or child:IsA("ImageButton") then
-            return child
-        end
+        if child:IsA("TextButton") or child:IsA("ImageButton") then return child end
     end
     return nil
 end
@@ -104,6 +103,12 @@ if hookfunction and ByteNetUnreliable then
     end))
 end
 
+local function normAngle(a) return a % 360 end
+local function angleDiff(a, b)
+    local d = math.abs(normAngle(a) - normAngle(b))
+    return d > 180 and 360 - d or d
+end
+
 local QTE, MainFrame, LineObj, BarsFolder
 local function initRefs()
     QTE = PlayerGui:FindFirstChild("QTE")
@@ -147,38 +152,34 @@ RunService.Heartbeat:Connect(function()
     local currentRot = 0
     if not pcall(function() currentRot = LineObj.Rotation end) then return end
 
-    if lastRot then
-        local dt = now - lastTime
-        if dt > 0 and dt < 0.5 then
-            local delta = currentRot - lastRot
-            if delta > 180 then delta = delta - 360
-            elseif delta < -180 then delta = delta + 360 end
-            
-            local vel = delta / dt
-            
-            if math.abs(vel) > 10 then
-                local bars = BarsFolder:GetChildren()
-                for i = 1, #bars do
-                    local bar = bars[i]
-                    if (bar:IsA("ImageLabel") or bar:IsA("Frame")) and bar.Visible then
-                        local barRot = 0
-                        pcall(function() barRot = bar.Rotation end)
-                        
-                        local dist = barRot - currentRot
-                        if dist > 180 then dist = dist - 360
-                        elseif dist < -180 then dist = dist + 360 end
-                        
-                        if (vel > 0 and dist > 0 and dist < 120) or (vel < 0 and dist < 0 and dist > -120) then
-                            local timeToCenter = dist / vel
-                            
-                            if timeToCenter <= CFG.PingDelay and timeToCenter >= -0.05 then
-                                if now - lastHitFire >= 0.1 then
-                                    fireQTEHit()
-                                    lastHitFire = now
-                                end
-                            end
-                        end
-                    end
+    local dt = now - lastTime
+    local vel = 0
+    if lastRot and dt > 0 and dt < 0.5 then
+        local delta = currentRot - lastRot
+        if delta > 180 then delta = delta - 360
+        elseif delta < -180 then delta = delta + 360 end
+        vel = delta / dt
+    end
+
+    local predictedRot = normAngle(currentRot + (vel * CFG.PingDelay))
+
+    local bars = BarsFolder:GetChildren()
+    for i = 1, #bars do
+        local bar = bars[i]
+        if (bar:IsA("ImageLabel") or bar:IsA("Frame")) and bar.Visible then
+            local barRot = 0
+            pcall(function() barRot = bar.Rotation end)
+
+            local arcDeg = 15
+            local n = bar.Name:match("_(%d+)$")
+            if n then arcDeg = tonumber(n) or 15 end
+
+            local perfectRadius = (arcDeg / 2) * CFG.PerfectStrictness
+
+            if angleDiff(predictedRot, normAngle(barRot)) <= perfectRadius then
+                if now - lastHitFire >= 0.08 then 
+                    fireQTEHit()
+                    lastHitFire = now
                 end
             end
         end
@@ -192,7 +193,7 @@ pcall(function() if PlayerGui:FindFirstChild("_MacroGUI") then PlayerGui:FindFir
 local sg = Instance.new("ScreenGui"); sg.Name = "_MacroGUI"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true; sg.Parent = PlayerGui
 local panel = Instance.new("Frame"); panel.Size = UDim2.new(0, 200, 0, 175); panel.Position = UDim2.new(0, 12, 0.5, -87); panel.BackgroundColor3 = Color3.fromRGB(14,14,18); panel.BorderSizePixel = 0; panel.Parent = sg; Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
 local topBar = Instance.new("Frame"); topBar.Size = UDim2.new(1,0,0,26); topBar.BackgroundColor3 = Color3.fromRGB(26,26,34); topBar.BorderSizePixel = 0; topBar.Parent = panel; Instance.new("UICorner", topBar).CornerRadius = UDim.new(0,10)
-local titleLbl = Instance.new("TextLabel"); titleLbl.Size = UDim2.new(1,-10,1,0); titleLbl.Position = UDim2.new(0,10,0,0); titleLbl.BackgroundTransparency = 1; titleLbl.Text = "🎣 Dynamic Velocity v4.6"; titleLbl.Font = Enum.Font.GothamBold; titleLbl.TextSize = 11; titleLbl.TextColor3 = Color3.fromRGB(200,200,225); titleLbl.TextXAlignment = Enum.TextXAlignment.Left; titleLbl.Parent = topBar
+local titleLbl = Instance.new("TextLabel"); titleLbl.Size = UDim2.new(1,-10,1,0); titleLbl.Position = UDim2.new(0,10,0,0); titleLbl.BackgroundTransparency = 1; titleLbl.Text = "🎣 Hybrid Perfect v4.7"; titleLbl.Font = Enum.Font.GothamBold; titleLbl.TextSize = 11; titleLbl.TextColor3 = Color3.fromRGB(200,200,225); titleLbl.TextXAlignment = Enum.TextXAlignment.Left; titleLbl.Parent = topBar
 local toggleBtn = Instance.new("TextButton"); toggleBtn.Size = UDim2.new(1,-16,0,32); toggleBtn.Position = UDim2.new(0,8,0,30); toggleBtn.BackgroundColor3 = Color3.fromRGB(35,175,95); toggleBtn.BorderSizePixel = 0; toggleBtn.Font = Enum.Font.GothamBold; toggleBtn.TextSize = 13; toggleBtn.TextColor3 = Color3.new(1,1,1); toggleBtn.Text = "AUTO FISH: ON"; toggleBtn.Parent = panel; Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,7)
 local sellBtn = Instance.new("TextButton"); sellBtn.Size = UDim2.new(1,-16,0,30); sellBtn.Position = UDim2.new(0,8,0,67); sellBtn.BackgroundColor3 = Color3.fromRGB(175,45,45); sellBtn.BorderSizePixel = 0; sellBtn.Font = Enum.Font.GothamBold; sellBtn.TextSize = 12; sellBtn.TextColor3 = Color3.new(1,1,1); sellBtn.Text = "AUTO SELL: OFF"; sellBtn.Parent = panel; Instance.new("UICorner", sellBtn).CornerRadius = UDim.new(0,7)
 local bufLbl = Instance.new("TextLabel"); bufLbl.Size = UDim2.new(1,-16,0,14); bufLbl.Position = UDim2.new(0,8,0,102); bufLbl.BackgroundTransparency = 1; bufLbl.Font = Enum.Font.Gotham; bufLbl.TextSize = 10; bufLbl.TextColor3 = Color3.fromRGB(200,140,50); bufLbl.Text = "Click 1 lần để capture buffer"; bufLbl.TextXAlignment = Enum.TextXAlignment.Left; bufLbl.Parent = panel
