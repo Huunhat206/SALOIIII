@@ -10,42 +10,39 @@ local PlayerGui = player.PlayerGui
 local camera    = workspace.CurrentCamera
 
 local CFG = {
-    Enabled           = true,
-    AutoSell          = false,
-    SellInterval      = 3.0,
-    IdleClickDelay    = 2.0,
-    PingDelay         = 0.05,
-    PerfectStrictness = 0.9,  -- nới rộng hơn để ít miss hơn
-    AntiAFK           = true,
-    AntiAFKInterval   = 60,   -- giây giữa mỗi lần anti-afk
-    Debug             = false,
+    Enabled        = true,
+    AutoSell       = false,
+    SellInterval   = 3.0,
+    IdleClickDelay = 2.0,
+    AntiAFK        = true,
+    AntiAFKInterval= 55,
+    -- Không dùng prediction nữa, chỉ dùng window mở rộng
+    WindowScale    = 1.0,  -- 1.0 = đúng kích thước arc, tăng nếu vẫn miss
+    HitCooldown    = 0.03, -- giây, nhỏ hơn để không bỏ lỡ frame
+    Debug          = false,
 }
 
-local ByteNetQuery      = ReplicatedStorage:WaitForChild("ByteNetQuery", 10)
 local ByteNetUnreliable = ReplicatedStorage:WaitForChild("ByteNetUnreliable", 10)
 local ByteNetReliable   = ReplicatedStorage:WaitForChild("ByteNetReliable", 10)
-
-local SELL_BUF = buffer.fromstring("2")
+local SELL_BUF          = buffer.fromstring("2")
+local lastHitBuffer     = nil
+local lastAFK           = tick()
 
 -- ══════════ ANTI-AFK ══════════
-local lastAFK = tick()
 task.spawn(function()
     while true do
         task.wait(CFG.AntiAFKInterval)
         if not CFG.AntiAFK then continue end
         pcall(function()
-            -- Jump giả để reset AFK timer
             local char = player.Character
             local hum  = char and char:FindFirstChildOfClass("Humanoid")
             if hum then hum.Jump = true end
-            -- VirtualUser fallback
             VirtualUser:CaptureController()
             VirtualUser:Button2Down(Vector2.new(0,0), camera.CFrame)
             task.wait(0.1)
             VirtualUser:Button2Up(Vector2.new(0,0), camera.CFrame)
         end)
         lastAFK = tick()
-        if CFG.Debug then print("[AFK] Anti-AFK fired") end
     end
 end)
 
@@ -73,9 +70,7 @@ local function tryOpenFishing()
 end
 
 -- ══════════ FIRE HIT ══════════
-local qteClickFunc  = nil
-local lastHitBuffer = nil
-
+local qteClickFunc = nil
 local function findQTEClickFunction()
     local qte  = PlayerGui:FindFirstChild("QTE")
     local main = qte and qte:FindFirstChild("Main")
@@ -86,13 +81,11 @@ local function findQTEClickFunction()
 end
 
 local function fireQTEHit()
-    -- Method 1: captured buffer (best, no mouse needed)
     if lastHitBuffer and ByteNetUnreliable then
         local ok = false
         pcall(function() ByteNetUnreliable:FireServer(lastHitBuffer); ok = true end)
         if ok then return end
     end
-    -- Method 2: getconnections
     if not qteClickFunc then qteClickFunc = findQTEClickFunction() end
     if qteClickFunc and getconnections then
         local fired = false
@@ -102,7 +95,6 @@ local function fireQTEHit()
         end)
         if fired then return end
     end
-    -- Method 3: VIM fallback
     local center = qteClickFunc
         and (qteClickFunc.AbsolutePosition + qteClickFunc.AbsoluteSize / 2)
         or  Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
@@ -113,7 +105,6 @@ local function fireQTEHit()
     end)
 end
 
--- Hook capture buffer
 if hookfunction and ByteNetUnreliable then
     local orig
     orig = hookfunction(ByteNetUnreliable.FireServer, newcclosure(function(self, ...)
@@ -129,7 +120,7 @@ if hookfunction and ByteNetUnreliable then
     end))
 end
 
--- ══════════ ANGLE UTILS ══════════
+-- ══════════ ANGLE ══════════
 local function normAngle(a) return a % 360 end
 local function angleDiff(a, b)
     local d = math.abs(normAngle(a) - normAngle(b))
@@ -148,38 +139,6 @@ local function initRefs()
     return LineObj ~= nil and BarsFolder ~= nil
 end
 
--- ══════════ VELOCITY HISTORY (smoothed prediction) ══════════
--- Dùng rolling average của 5 frame thay vì chỉ 1 frame → ít bị giật lag
-local ROT_HISTORY_SIZE = 5
-local rotHistory = {}  -- {rot, time}
-
-local function pushRotHistory(rot, t)
-    table.insert(rotHistory, {rot=rot, t=t})
-    if #rotHistory > ROT_HISTORY_SIZE then
-        table.remove(rotHistory, 1)
-    end
-end
-
-local function getSmoothedVelocity()
-    if #rotHistory < 2 then return 0 end
-    -- Linear regression qua tất cả điểm trong history
-    local n   = #rotHistory
-    local sumV = 0
-    local count = 0
-    for i = 2, n do
-        local dt = rotHistory[i].t - rotHistory[i-1].t
-        if dt > 0 and dt < 0.1 then
-            local delta = rotHistory[i].rot - rotHistory[i-1].rot
-            -- Wrap
-            if delta > 180  then delta = delta - 360 end
-            if delta < -180 then delta = delta + 360 end
-            sumV  = sumV + (delta / dt)
-            count = count + 1
-        end
-    end
-    return count > 0 and (sumV / count) or 0
-end
-
 -- ══════════ MAIN LOOP ══════════
 local lastIdleOpen = 0
 local lastHitFire  = 0
@@ -188,7 +147,6 @@ RunService.Heartbeat:Connect(function()
     if not CFG.Enabled then return end
     local now = tick()
 
-    -- QTE active check
     local qteActive = false
     local qteGui = PlayerGui:FindFirstChild("QTE")
     if qteGui and qteGui.Enabled then
@@ -197,8 +155,6 @@ RunService.Heartbeat:Connect(function()
     end
 
     if not qteActive then
-        -- Reset history khi QTE đóng
-        rotHistory = {}
         local delay = math.max(2.0, CFG.IdleClickDelay)
         if now - lastIdleOpen >= delay then
             tryOpenFishing()
@@ -207,31 +163,17 @@ RunService.Heartbeat:Connect(function()
         return
     end
 
-    -- Init refs
     if not LineObj or not LineObj.Parent or not BarsFolder or not BarsFolder.Parent then
         initRefs()
     end
     if not LineObj or not BarsFolder then return end
 
-    -- Lấy rotation hiện tại
+    -- Đọc rotation HIỆN TẠI, không predict
     local currentRot = 0
     if not pcall(function() currentRot = LineObj.Rotation end) then return end
+    currentRot = normAngle(currentRot)
 
-    -- Lưu history
-    pushRotHistory(currentRot, now)
-
-    -- Tính velocity đã smooth
-    local vel = getSmoothedVelocity()
-
-    -- Predict vị trí sau PingDelay giây
-    local predictedRot = normAngle(currentRot + vel * CFG.PingDelay)
-
-    if CFG.Debug and now % 1 < 0.02 then
-        print(string.format("[v5] rot=%.1f vel=%.1f°/s pred=%.1f",
-            currentRot, vel, predictedRot))
-    end
-
-    -- So sánh với từng Bar
+    -- So sánh thẳng với bar, không offset
     local bars = BarsFolder:GetChildren()
     for i = 1, #bars do
         local bar = bars[i]
@@ -241,27 +183,27 @@ RunService.Heartbeat:Connect(function()
             if visible then
                 local barRot = 0
                 pcall(function() barRot = bar.Rotation end)
+                barRot = normAngle(barRot)
 
                 local arcDeg = 15
                 local n = bar.Name:match("_(%d+)$")
                 if n then arcDeg = tonumber(n) or 15 end
 
-                -- Strictness nới rộng → window lớn hơn → ít miss hơn
-                local hitRadius = (arcDeg / 2) * CFG.PerfectStrictness
-
-                local diff = angleDiff(predictedRot, normAngle(barRot))
+                -- Window = arc thực * WindowScale
+                local window = (arcDeg / 2) * CFG.WindowScale
+                local diff   = angleDiff(currentRot, barRot)
 
                 if CFG.Debug then
-                    print(string.format("  %s | barRot=%.1f arc=±%.1f diff=%.1f %s",
-                        bar.Name, barRot, hitRadius, diff,
-                        diff <= hitRadius and "HIT!" or ""))
+                    print(string.format("[v5.1] rot=%.1f bar=%.1f diff=%.2f win=%.2f %s",
+                        currentRot, barRot, diff, window,
+                        diff <= window and "★HIT" or ""))
                 end
 
-                if diff <= hitRadius then
-                    -- Cooldown ngắn hơn v4.7 (0.05 thay vì 0.08) → bắt được frame tốt hơn
-                    if now - lastHitFire >= 0.05 then
+                if diff <= window then
+                    if now - lastHitFire >= CFG.HitCooldown then
                         fireQTEHit()
                         lastHitFire = now
+                        if CFG.Debug then print("[v5.1] FIRED!") end
                     end
                 end
             end
@@ -281,8 +223,8 @@ sg.Name = "_MacroGUI"; sg.ResetOnSpawn = false
 sg.IgnoreGuiInset = true; sg.Parent = PlayerGui
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 205, 0, 210)
-panel.Position = UDim2.new(0, 12, 0.5, -105)
+panel.Size = UDim2.new(0, 205, 0, 225)
+panel.Position = UDim2.new(0, 12, 0.5, -112)
 panel.BackgroundColor3 = Color3.fromRGB(14,14,18)
 panel.BorderSizePixel = 0; panel.Parent = sg
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
@@ -295,12 +237,11 @@ Instance.new("UICorner", topBar).CornerRadius = UDim.new(0,10)
 
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(1,-10,1,0); titleLbl.Position = UDim2.new(0,10,0,0)
-titleLbl.BackgroundTransparency = 1; titleLbl.Text = "🎣 Hybrid Perfect v5.0"
+titleLbl.BackgroundTransparency = 1; titleLbl.Text = "🎣 Hybrid Perfect v5.1"
 titleLbl.Font = Enum.Font.GothamBold; titleLbl.TextSize = 11
 titleLbl.TextColor3 = Color3.fromRGB(200,200,225)
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left; titleLbl.Parent = topBar
 
--- Buttons
 local function makeLargeBtn(text, y, color)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(1,-16,0,30); b.Position = UDim2.new(0,8,0,y)
@@ -314,7 +255,6 @@ end
 local toggleBtn = makeLargeBtn("AUTO FISH: ON",  30, Color3.fromRGB(35,175,95))
 local sellBtn   = makeLargeBtn("AUTO SELL: OFF", 65, Color3.fromRGB(175,45,45))
 
--- Anti-AFK toggle
 local afkBtn = Instance.new("TextButton")
 afkBtn.Size = UDim2.new(1,-16,0,24); afkBtn.Position = UDim2.new(0,8,0,100)
 afkBtn.BackgroundColor3 = Color3.fromRGB(40,100,175); afkBtn.BorderSizePixel = 0
@@ -323,16 +263,14 @@ afkBtn.TextColor3 = Color3.new(1,1,1); afkBtn.Text = "🛡 Anti-AFK: ON"
 afkBtn.Parent = panel; Instance.new("UICorner", afkBtn).CornerRadius = UDim.new(0,6)
 afkBtn.MouseButton1Click:Connect(function()
     CFG.AntiAFK = not CFG.AntiAFK
-    afkBtn.BackgroundColor3 = CFG.AntiAFK
-        and Color3.fromRGB(40,100,175) or Color3.fromRGB(60,60,80)
+    afkBtn.BackgroundColor3 = CFG.AntiAFK and Color3.fromRGB(40,100,175) or Color3.fromRGB(60,60,80)
     afkBtn.Text = CFG.AntiAFK and "🛡 Anti-AFK: ON" or "🛡 Anti-AFK: OFF"
 end)
 
 local bufLbl = Instance.new("TextLabel")
 bufLbl.Size = UDim2.new(1,-16,0,13); bufLbl.Position = UDim2.new(0,8,0,130)
 bufLbl.BackgroundTransparency = 1; bufLbl.Font = Enum.Font.Gotham; bufLbl.TextSize = 10
-bufLbl.TextColor3 = Color3.fromRGB(200,140,50)
-bufLbl.Text = "Click 1 lần để capture buffer"
+bufLbl.TextColor3 = Color3.fromRGB(200,140,50); bufLbl.Text = "Click 1 lần để capture buffer"
 bufLbl.TextXAlignment = Enum.TextXAlignment.Left; bufLbl.Parent = panel
 
 local statusLbl = Instance.new("TextLabel")
@@ -347,20 +285,21 @@ afkLbl.BackgroundTransparency = 1; afkLbl.Font = Enum.Font.Gotham; afkLbl.TextSi
 afkLbl.TextColor3 = Color3.fromRGB(100,140,200); afkLbl.Text = "AFK reset: chờ..."
 afkLbl.TextXAlignment = Enum.TextXAlignment.Left; afkLbl.Parent = panel
 
-local earlyLbl = Instance.new("TextLabel")
-earlyLbl.Size = UDim2.new(1,-16,0,13); earlyLbl.Position = UDim2.new(0,8,0,174)
-earlyLbl.BackgroundTransparency = 1; earlyLbl.Font = Enum.Font.Gotham; earlyLbl.TextSize = 10
-earlyLbl.TextColor3 = Color3.fromRGB(120,120,150)
-earlyLbl.Text = string.format("Ping bù: %d ms", CFG.PingDelay * 1000)
-earlyLbl.TextXAlignment = Enum.TextXAlignment.Left; earlyLbl.Parent = panel
+-- Window scale label + buttons
+local winLbl = Instance.new("TextLabel")
+winLbl.Size = UDim2.new(1,-16,0,13); winLbl.Position = UDim2.new(0,8,0,176)
+winLbl.BackgroundTransparency = 1; winLbl.Font = Enum.Font.Gotham; winLbl.TextSize = 10
+winLbl.TextColor3 = Color3.fromRGB(120,120,150)
+winLbl.Text = string.format("Window: %.1fx arc (miss → tăng)", CFG.WindowScale)
+winLbl.TextXAlignment = Enum.TextXAlignment.Left; winLbl.Parent = panel
 
 local btnRow = Instance.new("Frame")
-btnRow.Size = UDim2.new(1,-16,0,24); btnRow.Position = UDim2.new(0,8,0,188)
+btnRow.Size = UDim2.new(1,-16,0,26); btnRow.Position = UDim2.new(0,8,0,191)
 btnRow.BackgroundTransparency = 1; btnRow.Parent = panel
 
 local function makeSmallBtn(text, xoff)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0,54,1,0); b.Position = UDim2.new(0,xoff,0,0)
+    b.Size = UDim2.new(0,88,1,0); b.Position = UDim2.new(0,xoff,0,0)
     b.BackgroundColor3 = Color3.fromRGB(50,50,70); b.BorderSizePixel = 0
     b.Font = Enum.Font.GothamBold; b.TextSize = 11
     b.TextColor3 = Color3.new(1,1,1); b.Text = text; b.Parent = btnRow
@@ -368,18 +307,19 @@ local function makeSmallBtn(text, xoff)
     return b
 end
 
-local btnM = makeSmallBtn("- 10ms", 0)
-local btnP = makeSmallBtn("+ 10ms", 60)
+local btnM = makeSmallBtn("◀ Hẹp hơn", 0)
+local btnP = makeSmallBtn("Rộng hơn ▶", 94)
+
+local function updateWinLbl()
+    winLbl.Text = string.format("Window: %.1fx arc  (miss → rộng hơn)", CFG.WindowScale)
+end
 btnM.MouseButton1Click:Connect(function()
-    CFG.PingDelay = math.max(0, CFG.PingDelay - 0.01)
-    earlyLbl.Text = string.format("Ping bù: %d ms", CFG.PingDelay * 1000)
+    CFG.WindowScale = math.max(0.3, CFG.WindowScale - 0.1); updateWinLbl()
 end)
 btnP.MouseButton1Click:Connect(function()
-    CFG.PingDelay = math.min(0.5, CFG.PingDelay + 0.01)
-    earlyLbl.Text = string.format("Ping bù: %d ms", CFG.PingDelay * 1000)
+    CFG.WindowScale = math.min(3.0, CFG.WindowScale + 0.1); updateWinLbl()
 end)
 
--- Status update loop
 RunService.Heartbeat:Connect(function()
     if lastHitBuffer then
         bufLbl.Text = "✓ Buffer captured!"
@@ -392,11 +332,9 @@ RunService.Heartbeat:Connect(function()
         statusLbl.TextColor3 = active
             and Color3.fromRGB(80,200,120) or Color3.fromRGB(100,100,130)
     end
-    -- AFK countdown
     local nextAFK = math.max(0, math.ceil(CFG.AntiAFKInterval - (tick() - lastAFK)))
     afkLbl.Text = CFG.AntiAFK
-        and string.format("AFK reset: %ds nữa", nextAFK)
-        or  "AFK reset: OFF"
+        and string.format("AFK reset: %ds nữa", nextAFK) or "AFK reset: OFF"
     afkLbl.TextColor3 = CFG.AntiAFK
         and Color3.fromRGB(100,160,220) or Color3.fromRGB(80,80,80)
 end)
@@ -411,11 +349,9 @@ local function setSelling(s)
     sellBtn.BackgroundColor3 = s and Color3.fromRGB(35,175,95) or Color3.fromRGB(175,45,45)
     sellBtn.Text = s and "AUTO SELL: ON" or "AUTO SELL: OFF"
 end
-
 toggleBtn.MouseButton1Click:Connect(function() setFishing(not CFG.Enabled) end)
 sellBtn.MouseButton1Click:Connect(function() setSelling(not CFG.AutoSell) end)
 
--- Drag (mouse + touch)
 local drag, dStart, dPos = false, nil, nil
 topBar.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1
@@ -436,5 +372,4 @@ UserInputService.InputChanged:Connect(function(i)
     end
 end)
 
-print("[Hybrid Perfect v5.0] Loaded ✓")
-print(">> Click thủ công 1 lần vào QTE để capture buffer!")
+print("[Hybrid Perfect v5.1] Loaded ✓")
